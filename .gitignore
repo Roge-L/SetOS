@@ -81,6 +81,9 @@ out
 # OpenNext build output
 .open-next
 
+# Wrangler local state
+.wrangler
+
 # Nuxt.js build / generate output
 .nuxt
 dist
