@@ -1,9 +1,9 @@
-import { handleCommand } from "@/bot/commands";
-import { handleQuickAction } from "@/bot/quick-actions";
-import { handleFoodMessage } from "@/bot/food";
-import { handleWorkoutMessage } from "@/bot/workout";
+import { runAgent } from "@/bot/agent";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getActiveSession } from "@/services/workout-logger";
+import { transcribeAudio } from "@/services/openai/transcribe";
+import { downloadTelegramFile, uploadMealImage } from "@/bot/telegram-api";
+import { estimateMeal } from "@/services/openai/estimate-meal";
+import { logFood } from "@/services/food-logger";
 
 interface TelegramMessage {
   message_id: number;
@@ -20,7 +20,6 @@ interface TelegramUpdate {
   message?: TelegramMessage;
 }
 
-// Look up the SetOS user_id from a Telegram chat ID
 async function getUserId(telegramChatId: number): Promise<string | null> {
   const supabase = createAdminClient();
   const { data } = await supabase
@@ -52,9 +51,12 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
 
   const chatId = msg.chat.id;
 
-  // Handle commands
-  if (msg.text?.startsWith("/")) {
-    await handleCommand(chatId, msg.text, msg.from?.id);
+  // /start is handled before auth since it's used for setup
+  if (msg.text === "/start") {
+    await sendMessage(
+      chatId,
+      `*SetOS Bot*\n\nTo link your account, add a Telegram alias in the app with your chat ID: \`${chatId}\`\n\nOnce linked, just send messages naturally — food, workouts, corrections. The bot figures out what you mean.`
+    );
     return;
   }
 
@@ -68,50 +70,54 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     return;
   }
 
-  // Check if user has an active workout session
-  const activeSession = await getActiveSession(userId);
+  try {
+    // Photos go straight to OpenAI vision (databases can't process images)
+    if (msg.photo && msg.photo.length > 0) {
+      const photoBuffer = await downloadTelegramFile(
+        msg.photo[msg.photo.length - 1].file_id
+      );
+      const imageUrl = await uploadMealImage(userId, photoBuffer);
 
-  // Route: photo => food
-  if (msg.photo && msg.photo.length > 0) {
-    await handleFoodMessage(chatId, userId, {
-      text: msg.caption || null,
-      photoFileId: msg.photo[msg.photo.length - 1].file_id, // highest res
-    });
-    return;
-  }
-
-  // Route: voice
-  if (msg.voice) {
-    if (activeSession) {
-      // During workout, voice = workout logging not supported, treat as food
-      await handleFoodMessage(chatId, userId, {
-        voiceFileId: msg.voice.file_id,
+      const result = await logFood({
+        userId,
+        text: msg.caption || null,
+        imageUrl,
       });
-    } else {
-      await handleFoodMessage(chatId, userId, {
-        voiceFileId: msg.voice.file_id,
-      });
+
+      const est = result.estimation;
+      let reply = `*${est.parsed_meal_name}*\n`;
+      reply += `${est.estimated_calories} cal | P: ${Math.round(est.estimated_protein_g)}g | C: ${Math.round(est.estimated_carbs_g)}g | F: ${Math.round(est.estimated_fat_g)}g`;
+      if (est.estimated_fiber_g > 0) {
+        reply += ` | Fiber: ${Math.round(est.estimated_fiber_g)}g`;
+      }
+      reply += `\n_${est.confidence} confidence_`;
+      await sendMessage(chatId, reply);
+      return;
     }
-    return;
-  }
 
-  // Route: quick actions (delete last, move last, undo)
-  if (msg.text) {
-    const handled = await handleQuickAction(chatId, userId, msg.text);
-    if (handled) return;
-  }
+    // Voice: transcribe first, then run through the agent
+    let userText = msg.text || "";
+    let extraContext: string | undefined;
 
-  // Route: text
-  if (msg.text) {
-    if (activeSession) {
-      await handleWorkoutMessage(chatId, userId, activeSession.id, msg.text);
-    } else {
-      await handleFoodMessage(chatId, userId, { text: msg.text });
+    if (msg.voice) {
+      const audioBuffer = await downloadTelegramFile(msg.voice.file_id);
+      const transcript = await transcribeAudio(audioBuffer);
+      userText = transcript;
+      extraContext = "This was transcribed from a voice message.";
     }
-    return;
-  }
 
-  await sendMessage(chatId, "Send text, a photo, or a voice note to log.");
+    if (!userText.trim()) {
+      await sendMessage(chatId, "Send text, a photo, or a voice note.");
+      return;
+    }
+
+    // Everything else goes through the smart agent
+    const response = await runAgent(userId, userText, extraContext);
+    await sendMessage(chatId, response);
+  } catch (error) {
+    console.error("Bot error:", error);
+    await sendMessage(chatId, "Something went wrong. Try again.");
+  }
 }
 
 export { sendMessage };
