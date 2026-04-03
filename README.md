@@ -11,7 +11,8 @@ Log food via text, voice, or photos. Log workouts conversationally through Teleg
 | Framework | Next.js 15 (App Router, TypeScript) |
 | Styling | Tailwind CSS 4 |
 | Database & Auth | Supabase (Postgres, Auth, Storage) |
-| AI | OpenAI (food estimation, voice transcription, workout parsing) |
+| Nutrition data | FatSecret API, Open Food Facts API |
+| AI | OpenAI (vision, transcription, web search, workout parsing) |
 | Bot | Telegram Bot API (webhook) |
 | Hosting | Cloudflare Workers via OpenNext |
 | Validation | Zod |
@@ -24,7 +25,9 @@ components/     → React UI components (client + server)
 lib/            → Supabase clients, OpenAI client, shared utilities
 services/       → Core business logic
   ├── openai/   → AI service layer (transcribe, estimate, parse)
-  ├── food-logger.ts      → Food logging orchestrator
+  ├── fatsecret.ts        → FatSecret API client (restaurant + branded foods)
+  ├── openfoodfacts.ts    → Open Food Facts client (packaged products)
+  ├── food-logger.ts      → Food logging orchestrator (multi-source pipeline)
   ├── workout-parser.ts   → Deterministic workout parser
   ├── workout-logger.ts   → Workout session/set management
   └── daily-totals.ts     → Nutrition totals recalculation
@@ -34,9 +37,33 @@ validators/     → Zod schemas for runtime type safety
 db/migrations/  → Postgres schema migrations (run in Supabase SQL editor)
 ```
 
+### Food estimation pipeline
+
+Text-based input (no photo) goes through a multi-source pipeline that short-circuits at the first hit:
+
+| Step | Source | Best for | Cost |
+|------|--------|----------|------|
+| 1 | [FatSecret API](https://platform.fatsecret.com/api) | Restaurant meals, branded foods | Free (5,000/day) |
+| 2 | [Open Food Facts API](https://wiki.openfoodfacts.org/API) | Packaged products (barcoded items) | Free (no key needed) |
+| 3 | [OpenAI Responses API + web_search](https://platform.openai.com/docs/guides/tools-web-search) | Anything the databases miss | ~$0.025/search |
+| 4 | [OpenAI Chat Completions](https://platform.openai.com/docs/guides/text-generation) | Last resort (training data only) | Standard token cost |
+
+Photo-based input skips the pipeline entirely and goes straight to OpenAI vision.
+
+Examples:
+
+| Input | What happens |
+|-------|-------------|
+| `banana` | FatSecret match → done |
+| `Nando's quarter chicken` | FatSecret restaurant match → done |
+| `Quaker granola bar` | FatSecret or Open Food Facts match → done |
+| `my mom's chicken stew` | Databases miss → OpenAI web search → done |
+| Photo of nutrition label | Straight to OpenAI vision → done |
+| Photo + caption | Straight to OpenAI vision with caption context → done |
+
 ### Key flows
 
-**Food logging:** Telegram message → bot router → transcribe voice (if present) → download/upload photo (if present) → OpenAI estimates macros (validated with Zod) → insert into `meal_logs` → recalculate `daily_nutrition_totals`
+**Food logging:** Telegram message → bot router → transcribe voice (if present) → download/upload photo (if present) → run estimation pipeline (see above) → validate with Zod → insert into `meal_logs` → recalculate `daily_nutrition_totals`
 
 **Workout logging:** `/startworkout` creates session → text messages parsed deterministically first → LLM fallback if ambiguous → exercises and sets saved → `/finishworkout` closes session
 
@@ -51,6 +78,7 @@ db/migrations/  → Postgres schema migrations (run in Supabase SQL editor)
 - Node.js 20+ and npm
 - [Supabase](https://supabase.com) project
 - [OpenAI](https://platform.openai.com) API key
+- [FatSecret](https://platform.fatsecret.com) API credentials (free tier)
 - [Telegram bot](https://t.me/BotFather) (create via @BotFather → `/newbot`)
 - [Cloudflare](https://dash.cloudflare.com) account
 
@@ -77,6 +105,8 @@ Fill in every value. See `.env.example` for the full list.
 | `OPENAI_API_KEY` | OpenAI → API Keys |
 | `TELEGRAM_BOT_TOKEN` | @BotFather after `/newbot` |
 | `TELEGRAM_WEBHOOK_SECRET` | Generate with `openssl rand -hex 32` |
+| `FATSECRET_ID` | FatSecret → My Apps → your app → Client ID |
+| `FATSECRET_SECRET` | FatSecret → My Apps → your app → Client Secret |
 | `CLOUDFLARE_API_TOKEN` | Cloudflare → Profile → API Tokens → "Edit Cloudflare Workers" template |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare → Workers & Pages → Account ID (right sidebar) |
 
@@ -212,6 +242,8 @@ npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 npx wrangler secret put OPENAI_API_KEY
 npx wrangler secret put TELEGRAM_BOT_TOKEN
 npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
+npx wrangler secret put FATSECRET_ID
+npx wrangler secret put FATSECRET_SECRET
 ```
 
 Non-secret env vars (`NEXT_PUBLIC_*`, model names) go in `wrangler.jsonc` under `vars` or in the Cloudflare dashboard under Workers → Settings → Variables.
@@ -297,5 +329,7 @@ See `.env.example` for the complete list.
 | `OPENAI_MODEL_TRANSCRIBE` | No | No | Transcription model (default: `gpt-4o-mini-transcribe`) |
 | `TELEGRAM_BOT_TOKEN` | Yes | No | Telegram bot token from @BotFather |
 | `TELEGRAM_WEBHOOK_SECRET` | Yes | No | Webhook verification secret |
+| `FATSECRET_ID` | Yes | No | FatSecret client ID ([free tier](https://platform.fatsecret.com/api)) |
+| `FATSECRET_SECRET` | Yes | No | FatSecret client secret |
 | `CLOUDFLARE_ACCOUNT_ID` | Yes | No | Cloudflare account ID |
 | `CLOUDFLARE_API_TOKEN` | Yes | No | Cloudflare API token (Workers edit permission) |
