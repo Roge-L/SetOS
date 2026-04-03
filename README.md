@@ -12,8 +12,8 @@ Log food via text, voice, or photos. Log workouts conversationally through Teleg
 | Styling | Tailwind CSS 4 |
 | Database & Auth | Supabase (Postgres, Auth, Storage) |
 | Nutrition data | FatSecret API, Open Food Facts API |
-| AI | OpenAI (vision, transcription, web search, workout parsing) |
-| Bot | Telegram Bot API (webhook) |
+| AI | OpenAI (function-calling agent, vision, transcription, web search) |
+| Bot | Telegram Bot API (webhook + LLM agent router) |
 | Hosting | Cloudflare Workers via OpenNext |
 | Validation | Zod |
 
@@ -31,7 +31,9 @@ services/       → Core business logic
   ├── workout-parser.ts   → Deterministic workout parser
   ├── workout-logger.ts   → Workout session/set management
   └── daily-totals.ts     → Nutrition totals recalculation
-bot/            → Telegram bot message routing and handlers
+bot/            → Telegram bot: LLM agent (agent.ts) + webhook handler
+  ├── agent.ts  → Smart router: OpenAI function-calling agent with 8 tools
+  └── handler.ts → Webhook entry point, photo/voice preprocessing
 prompts/        → OpenAI prompt templates
 validators/     → Zod schemas for runtime type safety
 db/migrations/  → Postgres schema migrations (run in Supabase SQL editor)
@@ -61,11 +63,43 @@ Examples:
 | Photo of nutrition label | Straight to OpenAI vision → done |
 | Photo + caption | Straight to OpenAI vision with caption context → done |
 
+### Smart agent (message routing)
+
+Every text and voice message goes through an [OpenAI function-calling agent](https://platform.openai.com/docs/guides/function-calling) that decides what action(s) to take. Photos bypass the agent and go straight to OpenAI vision.
+
+The agent uses a manual loop pattern ([ref](https://developers.openai.com/cookbook/examples/orchestrating_agents)) with:
+- **`tool_choice: "auto"`** — model decides when to use tools vs reply conversationally
+- **`parallel_tool_calls: false`** — avoids ordering bugs ([ref](https://developers.openai.com/cookbook/examples/o-series/o3o4-mini_prompting_guide))
+- **`strict: true`** on all tools via [`zodFunction()`](https://github.com/openai/openai-node/blob/master/helpers.md) — guaranteed valid arguments ([ref](https://platform.openai.com/docs/guides/structured-outputs))
+- **Max 5 iterations** — safety valve against infinite loops
+- **gpt-4.1-mini** — fast, cheap (~$0.001/interaction), strong function calling
+
+**Available tools:**
+
+| Tool | Trigger |
+|------|---------|
+| `log_food` | User mentions eating/drinking something |
+| `log_workout_sets` | User sends exercise data (auto-creates session if needed) |
+| `start_workout` | User explicitly starts a workout |
+| `finish_workout` | User says they're done working out |
+| `move_meal` | "the eggs were actually yesterday" |
+| `delete_meal` | "delete the string cheese" |
+| `move_workout` | "the workout was last night" |
+| `delete_workout` | "remove that workout" |
+
+The agent can call **multiple tools in one turn** — e.g., "the workout was yesterday and the eggs were also yesterday" triggers two move operations.
+
 ### Key flows
 
-**Food logging:** Telegram message → bot router → transcribe voice (if present) → download/upload photo (if present) → run estimation pipeline (see above) → validate with Zod → insert into `meal_logs` → recalculate `daily_nutrition_totals`
+**Text message:** Telegram → agent picks tool(s) → executes → responds with results
 
-**Workout logging:** `/startworkout` creates session → text messages parsed deterministically first → LLM fallback if ambiguous → exercises and sets saved → `/finishworkout` closes session
+**Photo:** Telegram → download + upload to Supabase Storage → OpenAI vision estimates macros → save to `meal_logs`
+
+**Voice:** Telegram → download → OpenAI transcription → transcribed text goes through agent
+
+**Food estimation pipeline:** (see table above) FatSecret → Open Food Facts → OpenAI web search → OpenAI fallback
+
+**Workout logging:** Agent calls `log_workout_sets` → deterministic parser tries first → LLM fallback if ambiguous → auto-creates session if needed → saves exercises and sets
 
 **Dashboard:** Server components fetch today's totals, meals, workouts, and body weight from Supabase (RLS enforced per user).
 
@@ -288,28 +322,35 @@ When adding new tables or columns:
 
 ---
 
-## Bot Commands
+## Bot Usage
 
-| Command | Description |
-|---------|-------------|
-| `/start` | Setup instructions + your chat ID |
-| `/help` | Usage guide with examples |
-| `/today` | Today's calories, protein, meals, workouts |
-| `/startworkout` | Begin a workout session |
-| `/finishworkout` | End current workout session |
+The bot is conversational — just talk to it naturally. No commands required (though `/start` is needed for initial setup).
 
-### Logging examples
+### Examples
 
-**Food** (send as text, photo, or voice):
+**Food logging:**
 - `2 eggs, toast with butter, protein shake`
 - `poke bowl, ate most of the rice, all the salmon`
+- `had a banana`
 - Send a meal photo with caption: `chicken shawarma plate`
+- Send a voice note describing what you ate
 
-**Workout** (after `/startworkout`):
+**Workout logging:**
 - `bench 185x8`
 - `incline db 60s 10 10 8`
 - `lat pulldown 4x10 @ 140`
 - `ran 25 min easy`
+
+**Corrections (natural language):**
+- `the eggs were actually yesterday`
+- `move the workout to last night`
+- `delete the string cheese`
+- `the basketball workout and the ramen were both yesterday, fix them`
+
+**Other:**
+- `what did I eat today?` — agent responds conversationally
+- `thanks` — agent replies without calling any tool
+- `/start` — setup instructions + chat ID
 
 ---
 
