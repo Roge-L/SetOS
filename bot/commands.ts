@@ -38,7 +38,7 @@ export async function handleCommand(
     case "/help": {
       await sendMessage(
         chatId,
-        `*How to use SetOS:*\n\n🍽 *Food:* Send a text message, photo, or voice note\n🏋️ *Workout:* Use /startworkout, then send sets\n\nExamples:\n• "2 eggs, toast, protein shake"\n• "bench 185x8"\n• "ran 25 min easy"\n• Send a meal photo with caption\n\nCommands:\n/today — Today's summary\n/startworkout — Begin workout\n/finishworkout — End workout`
+        `*How to use SetOS:*\n\n🍽 *Food:* Send a text message, photo, or voice note\n🏋️ *Workout:* Use /startworkout, then send sets\n\nExamples:\n• "2 eggs, toast, protein shake"\n• "bench 185x8"\n• "ran 25 min easy"\n• Send a meal photo with caption\n\n*Quick actions:*\n• "delete last" — delete last meal\n• "undo" — same as delete last\n• "move last to yesterday"\n• "move last to april 2"\n\nCommands:\n/today — Today's summary\n/startworkout — Begin workout\n/finishworkout — End workout`
       );
       break;
     }

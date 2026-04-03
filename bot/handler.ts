@@ -1,4 +1,5 @@
 import { handleCommand } from "@/bot/commands";
+import { handleQuickAction } from "@/bot/quick-actions";
 import { handleFoodMessage } from "@/bot/food";
 import { handleWorkoutMessage } from "@/bot/workout";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -92,6 +93,12 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
       });
     }
     return;
+  }
+
+  // Route: quick actions (delete last, move last, undo)
+  if (msg.text) {
+    const handled = await handleQuickAction(chatId, userId, msg.text);
+    if (handled) return;
   }
 
   // Route: text
