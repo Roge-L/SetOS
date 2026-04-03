@@ -32,6 +32,7 @@ export function MealList({ meals }: { meals: MealLog[] }) {
               {new Date(meal.logged_at).toLocaleTimeString("en-US", {
                 hour: "numeric",
                 minute: "2-digit",
+                timeZone: "America/New_York",
               })}
             </div>
           </div>
