@@ -4,6 +4,7 @@ import { DailySummary } from "@/components/daily-summary";
 import { MealList } from "@/components/meal-list";
 import { WorkoutList } from "@/components/workout-list";
 import { BodyWeightEntry } from "@/components/body-weight-entry";
+import { todayDate, getUTCRangeForLocalDate, formatDateLong, formatDate } from "@/lib/utils";
 import Link from "next/link";
 
 export default async function DashboardPage() {
@@ -13,7 +14,8 @@ export default async function DashboardPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayDate();
+  const { start, end } = getUTCRangeForLocalDate(today);
 
   // Fetch all data in parallel
   const [totalsRes, mealsRes, workoutsRes, weightRes] = await Promise.all([
@@ -27,8 +29,8 @@ export default async function DashboardPage() {
       .from("meal_logs")
       .select("id, parsed_meal_name, estimated_calories, estimated_protein_g, logged_at, confidence")
       .eq("user_id", user.id)
-      .gte("logged_at", `${today}T00:00:00`)
-      .lte("logged_at", `${today}T23:59:59`)
+      .gte("logged_at", start)
+      .lte("logged_at", end)
       .order("logged_at", { ascending: true }),
     supabase
       .from("workout_sessions")
@@ -40,8 +42,8 @@ export default async function DashboardPage() {
         )
       `)
       .eq("user_id", user.id)
-      .gte("started_at", `${today}T00:00:00`)
-      .lte("started_at", `${today}T23:59:59`)
+      .gte("started_at", start)
+      .lte("started_at", end)
       .order("started_at", { ascending: true }),
     supabase
       .from("body_metrics")
@@ -60,20 +62,15 @@ export default async function DashboardPage() {
   const recentDays = Array.from({ length: 7 }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    return d.toISOString().slice(0, 10);
+    // Use en-CA for consistent YYYY-MM-DD in the user's timezone
+    return d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
   });
 
   return (
     <div className="space-y-6">
       {/* Date header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">
-          {new Date(today + "T00:00:00").toLocaleDateString("en-US", {
-            weekday: "long",
-            month: "long",
-            day: "numeric",
-          })}
-        </h1>
+        <h1 className="text-lg font-semibold">{formatDateLong(today)}</h1>
       </div>
 
       {/* Macro summary */}
@@ -113,11 +110,7 @@ export default async function DashboardPage() {
               href={`/dashboard/day/${d}`}
               className="text-xs bg-card border border-border rounded px-2 py-1 hover:border-accent"
             >
-              {new Date(d + "T00:00:00").toLocaleDateString("en-US", {
-                weekday: "short",
-                month: "short",
-                day: "numeric",
-              })}
+              {formatDate(d)}
             </Link>
           ))}
         </div>

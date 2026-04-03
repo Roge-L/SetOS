@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { DailySummary } from "@/components/daily-summary";
 import { MealList } from "@/components/meal-list";
 import { WorkoutList } from "@/components/workout-list";
+import { getUTCRangeForLocalDate, formatDateLong } from "@/lib/utils";
 import Link from "next/link";
 
 export default async function DayDetailPage({
@@ -17,6 +18,8 @@ export default async function DayDetailPage({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
+  const { start, end } = getUTCRangeForLocalDate(date);
+
   const [totalsRes, mealsRes, workoutsRes] = await Promise.all([
     supabase
       .from("daily_nutrition_totals")
@@ -28,8 +31,8 @@ export default async function DayDetailPage({
       .from("meal_logs")
       .select("id, parsed_meal_name, estimated_calories, estimated_protein_g, logged_at, confidence")
       .eq("user_id", user.id)
-      .gte("logged_at", `${date}T00:00:00`)
-      .lte("logged_at", `${date}T23:59:59`)
+      .gte("logged_at", start)
+      .lte("logged_at", end)
       .order("logged_at", { ascending: true }),
     supabase
       .from("workout_sessions")
@@ -41,8 +44,8 @@ export default async function DayDetailPage({
         )
       `)
       .eq("user_id", user.id)
-      .gte("started_at", `${date}T00:00:00`)
-      .lte("started_at", `${date}T23:59:59`)
+      .gte("started_at", start)
+      .lte("started_at", end)
       .order("started_at", { ascending: true }),
   ]);
 
@@ -56,13 +59,7 @@ export default async function DayDetailPage({
         <Link href="/dashboard" className="text-muted hover:text-foreground text-sm">
           &larr; Today
         </Link>
-        <h1 className="text-lg font-semibold">
-          {new Date(date + "T00:00:00").toLocaleDateString("en-US", {
-            weekday: "long",
-            month: "long",
-            day: "numeric",
-          })}
-        </h1>
+        <h1 className="text-lg font-semibold">{formatDateLong(date)}</h1>
       </div>
 
       <DailySummary

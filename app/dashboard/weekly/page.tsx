@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { WeeklySummary } from "@/components/weekly-summary";
+import { todayDate, dateInTimezone, getUTCRangeForLocalDate } from "@/lib/utils";
 
 export default async function WeeklyPage() {
   const supabase = await createClient();
@@ -9,13 +10,14 @@ export default async function WeeklyPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // Get the last 7 days
-  const today = new Date();
-  const weekAgo = new Date(today);
-  weekAgo.setDate(weekAgo.getDate() - 6);
+  // Get the last 7 days in local timezone
+  const endDate = todayDate();
+  const weekAgoDate = new Date();
+  weekAgoDate.setDate(weekAgoDate.getDate() - 6);
+  const startDate = dateInTimezone(weekAgoDate);
 
-  const startDate = weekAgo.toISOString().slice(0, 10);
-  const endDate = today.toISOString().slice(0, 10);
+  const { start: weekStart } = getUTCRangeForLocalDate(startDate);
+  const { end: weekEnd } = getUTCRangeForLocalDate(endDate);
 
   const [totalsRes, workoutsRes, weightRes] = await Promise.all([
     supabase
@@ -29,8 +31,8 @@ export default async function WeeklyPage() {
       .from("workout_sessions")
       .select("id, title, started_at")
       .eq("user_id", user.id)
-      .gte("started_at", `${startDate}T00:00:00`)
-      .lte("started_at", `${endDate}T23:59:59`),
+      .gte("started_at", weekStart)
+      .lte("started_at", weekEnd),
     supabase
       .from("body_metrics")
       .select("date, body_weight")

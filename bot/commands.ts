@@ -1,5 +1,6 @@
 import { sendMessage } from "@/bot/handler";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { todayDate, getUTCRangeForLocalDate } from "@/lib/utils";
 import {
   getActiveSession,
   startWorkoutSession,
@@ -50,7 +51,8 @@ export async function handleCommand(
       }
 
       const supabase = createAdminClient();
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayDate();
+      const { start, end } = getUTCRangeForLocalDate(today);
 
       const { data: totals } = await supabase
         .from("daily_nutrition_totals")
@@ -63,16 +65,16 @@ export async function handleCommand(
         .from("meal_logs")
         .select("parsed_meal_name, estimated_calories")
         .eq("user_id", userId)
-        .gte("logged_at", `${today}T00:00:00`)
-        .lte("logged_at", `${today}T23:59:59`)
+        .gte("logged_at", start)
+        .lte("logged_at", end)
         .order("logged_at");
 
       const { data: workouts } = await supabase
         .from("workout_sessions")
         .select("title, started_at, ended_at")
         .eq("user_id", userId)
-        .gte("started_at", `${today}T00:00:00`)
-        .lte("started_at", `${today}T23:59:59`);
+        .gte("started_at", start)
+        .lte("started_at", end);
 
       let msg = `*Today — ${today}*\n\n`;
 

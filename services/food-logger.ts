@@ -7,6 +7,7 @@ import { lookupFatSecret } from "@/services/fatsecret";
 import { searchOpenFoodFacts } from "@/services/openfoodfacts";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recalculateDailyTotals } from "@/services/daily-totals";
+import { todayDate } from "@/lib/utils";
 import type { MealEstimation } from "@/validators/meal";
 
 type SourceType = "text" | "voice" | "photo" | "multimodal";
@@ -163,9 +164,8 @@ export async function logFood(input: LogFoodInput): Promise<LogFoodResult> {
 
   if (error) throw new Error(`Failed to save meal log: ${error.message}`);
 
-  // Recalculate daily totals
-  const today = new Date().toISOString().slice(0, 10);
-  await recalculateDailyTotals(input.userId, today);
+  // Recalculate daily totals using local timezone date
+  await recalculateDailyTotals(input.userId, todayDate());
 
   return { estimation, mealLogId: data.id, source };
 }
