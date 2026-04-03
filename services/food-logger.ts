@@ -1,5 +1,10 @@
-import { estimateMeal } from "@/services/openai/estimate-meal";
+import {
+  estimateMeal,
+  estimateMealWithWebSearch,
+} from "@/services/openai/estimate-meal";
 import { transcribeAudio } from "@/services/openai/transcribe";
+import { lookupFatSecret } from "@/services/fatsecret";
+import { searchOpenFoodFacts } from "@/services/openfoodfacts";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recalculateDailyTotals } from "@/services/daily-totals";
 import type { MealEstimation } from "@/validators/meal";
@@ -16,6 +21,7 @@ interface LogFoodInput {
 interface LogFoodResult {
   estimation: MealEstimation;
   mealLogId: string;
+  source: "fatsecret" | "openfoodfacts" | "openai-web" | "openai";
 }
 
 function determineSourceType(input: LogFoodInput): SourceType {
@@ -29,6 +35,63 @@ function determineSourceType(input: LogFoodInput): SourceType {
   return "text";
 }
 
+// Try nutrition databases before falling back to OpenAI.
+// Database lookups only work for text-based queries (not photos/voice-only).
+async function estimateWithDatabases(
+  query: string
+): Promise<{ estimation: MealEstimation; source: "fatsecret" | "openfoodfacts" } | null> {
+  // Try FatSecret first (better for restaurant + branded foods)
+  const fsResult = await lookupFatSecret(query);
+  if (fsResult && fsResult.calories > 0) {
+    const brandNote = fsResult.brand_name
+      ? ` (${fsResult.brand_name})`
+      : "";
+    return {
+      source: "fatsecret",
+      estimation: {
+        parsed_meal_name: `${fsResult.food_name}${brandNote}`,
+        estimated_calories: Math.round(fsResult.calories),
+        estimated_protein_g: Math.round(fsResult.protein_g),
+        estimated_carbs_g: Math.round(fsResult.carbs_g),
+        estimated_fat_g: Math.round(fsResult.fat_g),
+        estimated_fiber_g: Math.round(fsResult.fiber_g),
+        confidence: "high",
+        assumptions: [
+          `Nutrition from FatSecret (${fsResult.food_type.toLowerCase()})`,
+          `Serving: ${fsResult.serving_description}`,
+        ],
+      },
+    };
+  }
+
+  // Try Open Food Facts (better for packaged products)
+  const offResult = await searchOpenFoodFacts(query);
+  if (offResult && offResult.calories > 0) {
+    const brandNote = offResult.brand ? ` (${offResult.brand})` : "";
+    return {
+      source: "openfoodfacts",
+      estimation: {
+        parsed_meal_name: `${offResult.food_name}${brandNote}`,
+        estimated_calories: offResult.calories,
+        estimated_protein_g: offResult.protein_g,
+        estimated_carbs_g: offResult.carbs_g,
+        estimated_fat_g: offResult.fat_g,
+        estimated_fiber_g: offResult.fiber_g,
+        confidence: "high",
+        assumptions: [
+          "Nutrition from Open Food Facts (per 100g)",
+          ...(offResult.serving_size
+            ? [`Package serving: ${offResult.serving_size}`]
+            : []),
+          "Adjust if your portion differs from 100g",
+        ],
+      },
+    };
+  }
+
+  return null;
+}
+
 export async function logFood(input: LogFoodInput): Promise<LogFoodResult> {
   let transcript: string | null = null;
 
@@ -37,12 +100,41 @@ export async function logFood(input: LogFoodInput): Promise<LogFoodResult> {
     transcript = await transcribeAudio(input.audioBuffer);
   }
 
-  // Estimate macros
-  const estimation = await estimateMeal({
-    text: input.text,
-    transcript,
-    imageUrl: input.imageUrl,
-  });
+  const query = input.text || transcript;
+  const hasImage = !!input.imageUrl;
+  let estimation: MealEstimation;
+  let source: "fatsecret" | "openfoodfacts" | "openai-web" | "openai" =
+    "openai";
+
+  // For text-only queries (no photo), try database lookups first
+  if (query && !hasImage) {
+    const dbResult = await estimateWithDatabases(query);
+    if (dbResult) {
+      estimation = dbResult.estimation;
+      source = dbResult.source;
+    } else {
+      // Databases missed — try OpenAI with web search for real nutrition data
+      try {
+        estimation = await estimateMealWithWebSearch(query);
+        source = "openai-web";
+      } catch (e) {
+        // Web search failed — fall back to plain OpenAI estimation
+        console.error("Web search estimation failed, using plain OpenAI:", e);
+        estimation = await estimateMeal({
+          text: input.text,
+          transcript,
+          imageUrl: null,
+        });
+      }
+    }
+  } else {
+    // Photos — go straight to OpenAI vision
+    estimation = await estimateMeal({
+      text: input.text,
+      transcript,
+      imageUrl: input.imageUrl,
+    });
+  }
 
   const sourceType = determineSourceType(input);
 
@@ -75,5 +167,5 @@ export async function logFood(input: LogFoodInput): Promise<LogFoodResult> {
   const today = new Date().toISOString().slice(0, 10);
   await recalculateDailyTotals(input.userId, today);
 
-  return { estimation, mealLogId: data.id };
+  return { estimation, mealLogId: data.id, source };
 }
