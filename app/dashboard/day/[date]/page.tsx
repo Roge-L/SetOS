@@ -37,7 +37,7 @@ export default async function DayDetailPage({
     supabase
       .from("workout_sessions")
       .select(`
-        id, title, active,
+        id, title,
         workout_exercises (
           exercise_name, normalized_exercise_name,
           workout_sets ( reps, weight, unit, duration_seconds )

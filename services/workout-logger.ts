@@ -17,42 +17,29 @@ interface LogWorkoutResult {
   usedLLM: boolean;
 }
 
-export async function getActiveSession(userId: string) {
+// Get or create today's workout session
+export async function getTodaySession(userId: string) {
   const supabase = createAdminClient();
-  const { data } = await supabase
+  const today = todayDate();
+
+  const { data: existing } = await supabase
     .from("workout_sessions")
     .select("*")
     .eq("user_id", userId)
-    .eq("active", true)
+    .eq("date", today)
     .order("created_at", { ascending: false })
     .limit(1)
     .single();
-  return data;
-}
 
-export async function startWorkoutSession(userId: string, title?: string) {
-  const supabase = createAdminClient();
+  if (existing) return existing;
+
   const { data, error } = await supabase
     .from("workout_sessions")
-    .insert({
-      user_id: userId,
-      title: title || null,
-      date: todayDate(),
-      active: true,
-    })
+    .insert({ user_id: userId, date: today })
     .select()
     .single();
-  if (error) throw new Error(`Failed to start workout: ${error.message}`);
+  if (error) throw new Error(`Failed to create workout session: ${error.message}`);
   return data;
-}
-
-export async function finishWorkoutSession(sessionId: string) {
-  const supabase = createAdminClient();
-  const { error } = await supabase
-    .from("workout_sessions")
-    .update({ active: false })
-    .eq("id", sessionId);
-  if (error) throw new Error(`Failed to finish workout: ${error.message}`);
 }
 
 export async function getLastExerciseName(

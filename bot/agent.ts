@@ -16,9 +16,7 @@ import { getOpenAI, models } from "@/lib/openai";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logFood } from "@/services/food-logger";
 import {
-  getActiveSession,
-  startWorkoutSession,
-  finishWorkoutSession,
+  getTodaySession,
   logWorkoutExercises,
   getLastExerciseName,
 } from "@/services/workout-logger";
@@ -32,6 +30,40 @@ const MAX_ITERATIONS = 5;
 // Ref: https://www.postgresql.org/docs/current/functions-matching.html#FUNCTIONS-LIKE
 function escapeLike(input: string): string {
   return input.replace(/[%_\\]/g, "\\$&");
+}
+
+// Format sets in standard gym notation:
+// - All same weight & reps: "4x10 @ 35 lbs"
+// - Same weight, diff reps: "35 lbs x 10, 10, 8, 6"
+// - No weight: "4x10" or "10, 10, 8"
+// - Mixed weights: "135x5, 185x5, 225x3"
+function formatSets(sets: { reps: number | null; weight: number | null; unit?: string }[]): string {
+  if (sets.length === 0) return "—";
+
+  const weights = sets.map((s) => s.weight);
+  const reps = sets.map((s) => s.reps);
+  const unit = sets[0]?.unit || "lb";
+  const allSameWeight = weights.every((w) => w === weights[0]);
+  const allSameReps = reps.every((r) => r === reps[0]);
+
+  if (allSameWeight && allSameReps && reps[0]) {
+    const base = `${sets.length}x${reps[0]}`;
+    return weights[0] ? `${base} @ ${weights[0]} ${unit}` : base;
+  }
+
+  if (allSameWeight && weights[0]) {
+    return `${weights[0]} ${unit} x ${reps.map((r) => r ?? "—").join(", ")}`;
+  }
+
+  return sets
+    .map((s) =>
+      s.weight && s.reps
+        ? `${s.weight}x${s.reps}`
+        : s.reps
+          ? `${s.reps} reps`
+          : "—"
+    )
+    .join(", ");
 }
 
 // --- Tool schemas (strict: true is set automatically by zodFunction) ---
@@ -51,14 +83,6 @@ const LogWorkoutSetsSchema = z.object({
       "Weight in lbs if the user mentioned one (e.g. 225, 135). Null if no weight mentioned. Extract from any format: '225 lbs', 'at 225', 'with 225', etc."
     ),
 });
-
-const StartWorkoutSchema = z.object({
-  title: z
-    .string()
-    .describe("Optional workout title, or empty string if none given"),
-});
-
-const FinishWorkoutSchema = z.object({});
 
 const MoveMealSchema = z.object({
   meal_name_hint: z
@@ -101,19 +125,7 @@ const TOOLS = [
     name: "log_workout_sets",
     parameters: LogWorkoutSetsSchema,
     description:
-      'Log workout sets. Call when the user describes exercises, sets, reps, or cardio. Examples: "bench 5x5 at 225", "ran 25 min", "squat 315 5 5 3". Always extract the weight if mentioned. Auto-creates a workout session if none is active.',
-  }),
-  zodFunction({
-    name: "start_workout",
-    parameters: StartWorkoutSchema,
-    description:
-      "Explicitly start a new workout session. Only call if the user explicitly says they want to start a workout, not when they just log sets.",
-  }),
-  zodFunction({
-    name: "finish_workout",
-    parameters: FinishWorkoutSchema,
-    description:
-      "End the current workout session. Call when the user says they're done working out.",
+      'Log workout sets. Call when the user describes exercises, sets, reps, or cardio. Examples: "bench 5x5 at 225", "ran 25 min", "squat 315 5 5 3". Always extract the weight if mentioned. Sets are added to today\'s workout automatically.',
   }),
   zodFunction({
     name: "move_meal",
@@ -161,10 +173,7 @@ async function executeTool(
     }
 
     case "log_workout_sets": {
-      let session = await getActiveSession(userId);
-      if (!session) {
-        session = await startWorkoutSession(userId);
-      }
+      const session = await getTodaySession(userId);
       const currentExercise = await getLastExerciseName(session.id);
       const result = await logWorkoutExercises({
         userId,
@@ -185,37 +194,9 @@ async function executeTool(
               : "?";
             return `Logged: ${ex.normalized_exercise_name} — ${mins} min${s?.notes ? " " + s.notes : ""}`;
           }
-          const sets = ex.sets
-            .map((s) =>
-              s.weight && s.reps
-                ? `${s.weight}x${s.reps}`
-                : s.reps
-                  ? `${s.reps} reps`
-                  : "—"
-            )
-            .join(", ");
-          return `Logged: ${ex.normalized_exercise_name} — ${sets}`;
+          return `Logged: ${ex.normalized_exercise_name} — ${formatSets(ex.sets)}`;
         })
         .join("\n");
-    }
-
-    case "start_workout": {
-      const existing = await getActiveSession(userId);
-      if (existing) {
-        return "You already have an active workout. Finish it first or just send your sets.";
-      }
-      const session = await startWorkoutSession(
-        userId,
-        args.title || undefined
-      );
-      return `Workout started${session.title ? ": " + session.title : ""}. Send your sets!`;
-    }
-
-    case "finish_workout": {
-      const session = await getActiveSession(userId);
-      if (!session) return "No active workout to finish.";
-      await finishWorkoutSession(session.id);
-      return "Workout finished. Nice work!";
     }
 
     case "move_meal": {
@@ -328,7 +309,7 @@ async function buildContext(userId: string): Promise<string> {
   const todayRange = getUTCRangeForLocalDate(today);
   const yesterdayRange = getUTCRangeForLocalDate(yesterdayStr);
 
-  const [mealsToday, mealsYesterday, workoutsRecent, activeSession] =
+  const [mealsToday, mealsYesterday, workoutsRecent] =
     await Promise.all([
       supabase
         .from("meal_logs")
@@ -346,15 +327,13 @@ async function buildContext(userId: string): Promise<string> {
         .order("logged_at"),
       supabase
         .from("workout_sessions")
-        .select("title, date, active")
+        .select("title, date")
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(5),
-      getActiveSession(userId),
     ]);
 
-  let ctx = `Today: ${today}. Yesterday: ${yesterdayStr}.\n`;
-  ctx += `Active workout session: ${activeSession ? "YES" : "no"}\n\n`;
+  let ctx = `Today: ${today}. Yesterday: ${yesterdayStr}.\n\n`;
 
   ctx += "Today's meals:\n";
   for (const m of mealsToday.data || []) {
@@ -370,7 +349,7 @@ async function buildContext(userId: string): Promise<string> {
 
   ctx += "\nRecent workouts:\n";
   for (const w of workoutsRecent.data || []) {
-    ctx += `- ${w.title || "Untitled"} (${w.date})${w.active ? " [active]" : ""}\n`;
+    ctx += `- ${w.title || "Untitled"} (${w.date})\n`;
   }
   if (!workoutsRecent.data?.length) ctx += "- (none)\n";
 
@@ -379,11 +358,11 @@ async function buildContext(userId: string): Promise<string> {
 
 const SYSTEM_PROMPT = `You are SetOS, a personal calorie/macro and workout tracking assistant on Telegram. Be concise.
 
-You have tools to: log food, log workout sets, start/finish workouts, move entries between dates, and delete entries.
+You have tools to: log food, log workout sets, move entries between dates, and delete entries.
 
 Rules:
 - When the user mentions eating or drinking something, call log_food with their exact description.
-- When the user sends workout data (exercises, sets, reps, weight, cardio), call log_workout_sets. Always extract the weight if mentioned anywhere in the message. This auto-creates a session if needed.
+- When the user sends workout data (exercises, sets, reps, weight, cardio), call log_workout_sets. Always extract the weight if mentioned anywhere in the message. Sets are added to today's workout automatically.
 - When the user wants to correct dates ("was actually yesterday", "move X to april 2"), call the appropriate move tool. Convert "yesterday"/"last night" to the actual YYYY-MM-DD date.
 - When the user wants to delete something, call the appropriate delete tool.
 - You may call multiple tools in one turn if the user asks for multiple corrections.
