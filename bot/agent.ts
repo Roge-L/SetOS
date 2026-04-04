@@ -44,6 +44,12 @@ const LogFoodSchema = z.object({
 
 const LogWorkoutSetsSchema = z.object({
   text: z.string().describe("The workout sets text exactly as the user said it"),
+  weight: z
+    .number()
+    .nullable()
+    .describe(
+      "Weight in lbs if the user mentioned one (e.g. 225, 135). Null if no weight mentioned. Extract from any format: '225 lbs', 'at 225', 'with 225', etc."
+    ),
 });
 
 const StartWorkoutSchema = z.object({
@@ -95,7 +101,7 @@ const TOOLS = [
     name: "log_workout_sets",
     parameters: LogWorkoutSetsSchema,
     description:
-      'Log workout sets. Call when the user describes exercises, sets, reps, or cardio. Examples: "bench 185x8", "ran 25 min", "10 10 8". Auto-creates a workout session if none is active.',
+      'Log workout sets. Call when the user describes exercises, sets, reps, or cardio. Examples: "bench 5x5 at 225", "ran 25 min", "squat 315 5 5 3". Always extract the weight if mentioned. Auto-creates a workout session if none is active.',
   }),
   zodFunction({
     name: "start_workout",
@@ -165,6 +171,7 @@ async function executeTool(
         sessionId: session.id,
         text: args.text,
         currentExercise,
+        defaultWeight: args.weight ?? undefined,
       });
       if (result.exercises.length === 0) {
         return "Couldn't parse workout sets. Try a format like: bench 185x8, or 10 10 8";
@@ -382,7 +389,7 @@ You have tools to: log food, log workout sets, start/finish workouts, move entri
 
 Rules:
 - When the user mentions eating or drinking something, call log_food with their exact description.
-- When the user sends workout data (exercises, sets, reps, weight, cardio), call log_workout_sets. This auto-creates a session if needed.
+- When the user sends workout data (exercises, sets, reps, weight, cardio), call log_workout_sets. Always extract the weight if mentioned anywhere in the message. This auto-creates a session if needed.
 - When the user wants to correct dates ("was actually yesterday", "move X to april 2"), call the appropriate move tool. Convert "yesterday"/"last night" to the actual YYYY-MM-DD date.
 - When the user wants to delete something, call the appropriate delete tool.
 - You may call multiple tools in one turn if the user asks for multiple corrections.

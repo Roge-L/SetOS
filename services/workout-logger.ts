@@ -8,6 +8,7 @@ interface LogWorkoutInput {
   sessionId: string;
   text: string;
   currentExercise?: string | null;
+  defaultWeight?: number;
 }
 
 interface LogWorkoutResult {
@@ -86,6 +87,18 @@ export async function logWorkoutExercises(
 
   if (!exercises || exercises.length === 0) {
     return { exercises: [], usedLLM };
+  }
+
+  // Apply default weight to any sets that don't have one
+  if (input.defaultWeight) {
+    for (const ex of exercises) {
+      if (ex.is_cardio) continue;
+      for (const s of ex.sets) {
+        if (s.weight === null || s.weight === undefined) {
+          s.weight = input.defaultWeight;
+        }
+      }
+    }
   }
 
   const supabase = createAdminClient();
