@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { parseWorkoutMessage } from "@/services/workout-parser";
 import { parseWorkoutWithLLM } from "@/services/openai/parse-workout";
+import { todayDate } from "@/lib/utils";
 import type { ParsedExercise } from "@/validators/workout";
 
 interface LogWorkoutInput {
@@ -22,8 +23,8 @@ export async function getActiveSession(userId: string) {
     .from("workout_sessions")
     .select("*")
     .eq("user_id", userId)
-    .is("ended_at", null)
-    .order("started_at", { ascending: false })
+    .eq("active", true)
+    .order("created_at", { ascending: false })
     .limit(1)
     .single();
   return data;
@@ -36,7 +37,8 @@ export async function startWorkoutSession(userId: string, title?: string) {
     .insert({
       user_id: userId,
       title: title || null,
-      started_at: new Date().toISOString(),
+      date: todayDate(),
+      active: true,
     })
     .select()
     .single();
@@ -48,7 +50,7 @@ export async function finishWorkoutSession(sessionId: string) {
   const supabase = createAdminClient();
   const { error } = await supabase
     .from("workout_sessions")
-    .update({ ended_at: new Date().toISOString() })
+    .update({ active: false })
     .eq("id", sessionId);
   if (error) throw new Error(`Failed to finish workout: ${error.message}`);
 }

@@ -3,8 +3,7 @@ import Link from "next/link";
 interface WorkoutSession {
   id: string;
   title: string | null;
-  started_at: string;
-  ended_at: string | null;
+  active: boolean;
   workout_exercises: {
     exercise_name: string;
     normalized_exercise_name: string;
@@ -34,7 +33,7 @@ export function WorkoutList({ workouts }: { workouts: WorkoutSession[] }) {
           <div className="flex items-center justify-between mb-2">
             <div className="text-sm font-medium">
               {w.title || "Workout"}{" "}
-              {!w.ended_at && (
+              {w.active && (
                 <span className="text-xs text-warning">(active)</span>
               )}
             </div>

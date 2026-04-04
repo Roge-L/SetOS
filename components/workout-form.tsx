@@ -25,6 +25,7 @@ interface WorkoutExercise {
 interface Workout {
   id: string;
   title: string | null;
+  date: string;
   notes: string | null;
   workout_exercises: WorkoutExercise[];
 }
@@ -32,6 +33,7 @@ interface Workout {
 export function WorkoutForm({ workout }: { workout: Workout }) {
   const router = useRouter();
   const [title, setTitle] = useState(workout.title || "");
+  const [workoutDate, setWorkoutDate] = useState(workout.date);
   const [exercises, setExercises] = useState(workout.workout_exercises);
   const [saving, setSaving] = useState(false);
 
@@ -59,13 +61,11 @@ export function WorkoutForm({ workout }: { workout: Workout }) {
     setSaving(true);
     const supabase = createClient();
 
-    // Update session title
     await supabase
       .from("workout_sessions")
-      .update({ title: title || null })
+      .update({ title: title || null, date: workoutDate })
       .eq("id", workout.id);
 
-    // Update each set
     for (const ex of exercises) {
       for (const set of ex.workout_sets) {
         await supabase
@@ -108,6 +108,16 @@ export function WorkoutForm({ workout }: { workout: Workout }) {
 
   return (
     <div className="space-y-6">
+      <div>
+        <label className="text-xs text-muted block mb-1">Date</label>
+        <input
+          type="date"
+          value={workoutDate}
+          onChange={(e) => setWorkoutDate(e.target.value)}
+          className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent"
+        />
+      </div>
+
       <div>
         <label className="text-xs text-muted block mb-1">Title</label>
         <input

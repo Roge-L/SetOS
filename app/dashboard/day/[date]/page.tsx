@@ -37,16 +37,15 @@ export default async function DayDetailPage({
     supabase
       .from("workout_sessions")
       .select(`
-        id, title, started_at, ended_at,
+        id, title, active,
         workout_exercises (
           exercise_name, normalized_exercise_name,
           workout_sets ( reps, weight, unit, duration_seconds )
         )
       `)
       .eq("user_id", user.id)
-      .gte("started_at", start)
-      .lte("started_at", end)
-      .order("started_at", { ascending: true }),
+      .eq("date", date)
+      .order("created_at", { ascending: true }),
   ]);
 
   const totals = totalsRes.data;

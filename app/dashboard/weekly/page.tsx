@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { WeeklySummary } from "@/components/weekly-summary";
-import { todayDate, dateInTimezone, getUTCRangeForLocalDate } from "@/lib/utils";
+import { todayDate, dateInTimezone } from "@/lib/utils";
 
 export default async function WeeklyPage() {
   const supabase = await createClient();
@@ -16,9 +16,6 @@ export default async function WeeklyPage() {
   weekAgoDate.setDate(weekAgoDate.getDate() - 6);
   const startDate = dateInTimezone(weekAgoDate);
 
-  const { start: weekStart } = getUTCRangeForLocalDate(startDate);
-  const { end: weekEnd } = getUTCRangeForLocalDate(endDate);
-
   const [totalsRes, workoutsRes, weightRes] = await Promise.all([
     supabase
       .from("daily_nutrition_totals")
@@ -29,10 +26,10 @@ export default async function WeeklyPage() {
       .order("date"),
     supabase
       .from("workout_sessions")
-      .select("id, title, started_at")
+      .select("id, title, date")
       .eq("user_id", user.id)
-      .gte("started_at", weekStart)
-      .lte("started_at", weekEnd),
+      .gte("date", startDate)
+      .lte("date", endDate),
     supabase
       .from("body_metrics")
       .select("date, body_weight")

@@ -269,7 +269,7 @@ async function executeTool(
     case "move_workout": {
       const { data: workouts } = await supabase
         .from("workout_sessions")
-        .select("id, title, started_at, ended_at")
+        .select("id, title")
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(10);
@@ -282,15 +282,10 @@ async function executeTool(
 
       if (!workout) return `No workout found matching "${args.workout_hint}"`;
 
-      const timePart = workout.started_at.slice(11);
-      const update: Record<string, string> = {
-        started_at: `${args.target_date}T${timePart}`,
-      };
-      if (workout.ended_at) {
-        update.ended_at = `${args.target_date}T${workout.ended_at.slice(11)}`;
-      }
-
-      await supabase.from("workout_sessions").update(update).eq("id", workout.id);
+      await supabase
+        .from("workout_sessions")
+        .update({ date: args.target_date })
+        .eq("id", workout.id);
 
       return `Moved workout "${workout.title || "Untitled"}" to ${args.target_date}`;
     }
@@ -351,7 +346,7 @@ async function buildContext(userId: string): Promise<string> {
         .order("logged_at"),
       supabase
         .from("workout_sessions")
-        .select("title, started_at, ended_at")
+        .select("title, date, active")
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(5),
@@ -375,8 +370,7 @@ async function buildContext(userId: string): Promise<string> {
 
   ctx += "\nRecent workouts:\n";
   for (const w of workoutsRecent.data || []) {
-    const dateStr = dateInTimezone(new Date(w.started_at));
-    ctx += `- ${w.title || "Untitled"} (${dateStr})${w.ended_at ? "" : " [active]"}\n`;
+    ctx += `- ${w.title || "Untitled"} (${w.date})${w.active ? " [active]" : ""}\n`;
   }
   if (!workoutsRecent.data?.length) ctx += "- (none)\n";
 
