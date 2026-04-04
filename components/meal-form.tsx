@@ -15,11 +15,11 @@ interface MealLog {
   logged_at: string;
 }
 
-// Extract YYYY-MM-DD from an ISO timestamp in ET
-// Uses the same timezone as the server for consistency
+import { TIMEZONE } from "@/lib/utils";
+
 function getDateFromISO(isoString: string): string {
   return new Date(isoString).toLocaleDateString("en-CA", {
-    timeZone: "America/New_York",
+    timeZone: TIMEZONE,
   });
 }
 

@@ -1,12 +1,9 @@
 import OpenAI from "openai";
 
-let _client: OpenAI | null = null;
-
+// No singleton caching — Cloudflare Workers don't persist module state between requests.
+// Ref: https://github.com/cloudflare/workerd/issues/2328
 export function getOpenAI(): OpenAI {
-  if (!_client) {
-    _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
-  }
-  return _client;
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 }
 
 export const models = {

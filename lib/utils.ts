@@ -5,7 +5,7 @@
 // Cloudflare Workers run in UTC — there is no system timezone.
 // We must explicitly convert using Intl APIs.
 // Ref: https://github.com/cloudflare/workerd/issues/2328
-const TIMEZONE = "America/New_York";
+export const TIMEZONE = "America/New_York";
 
 // Today's date in local timezone as YYYY-MM-DD
 export function todayDate(): string {
@@ -87,15 +87,4 @@ export function formatDateLong(date: string): string {
     month: "long",
     day: "numeric",
   });
-}
-
-export function startOfWeek(date: string): string {
-  const d = new Date(date + "T12:00:00Z");
-  const day = d.getDay();
-  d.setDate(d.getDate() - day);
-  return dateInTimezone(d);
-}
-
-export function clamp(n: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, n));
 }

@@ -2,12 +2,9 @@ import { NextResponse } from "next/server";
 import { handleTelegramUpdate } from "@/bot/handler";
 
 export async function POST(request: Request) {
-  // Verify webhook secret
+  // Verify webhook secret — reject if missing or mismatched
   const secret = request.headers.get("x-telegram-bot-api-secret-token");
-  if (
-    process.env.TELEGRAM_WEBHOOK_SECRET &&
-    secret !== process.env.TELEGRAM_WEBHOOK_SECRET
-  ) {
+  if (!process.env.TELEGRAM_WEBHOOK_SECRET || secret !== process.env.TELEGRAM_WEBHOOK_SECRET) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

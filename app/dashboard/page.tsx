@@ -4,7 +4,7 @@ import { DailySummary } from "@/components/daily-summary";
 import { MealList } from "@/components/meal-list";
 import { WorkoutList } from "@/components/workout-list";
 import { BodyWeightEntry } from "@/components/body-weight-entry";
-import { todayDate, getUTCRangeForLocalDate, formatDateLong, formatDate } from "@/lib/utils";
+import { todayDate, getUTCRangeForLocalDate, formatDateLong, formatDate, TIMEZONE } from "@/lib/utils";
 import Link from "next/link";
 
 export default async function DashboardPage() {
@@ -63,7 +63,7 @@ export default async function DashboardPage() {
     const d = new Date();
     d.setDate(d.getDate() - i);
     // Use en-CA for consistent YYYY-MM-DD in the user's timezone
-    return d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    return d.toLocaleDateString("en-CA", { timeZone: TIMEZONE });
   });
 
   return (

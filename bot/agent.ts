@@ -28,6 +28,12 @@ import type { ChatCompletionMessageParam } from "openai/resources/chat/completio
 
 const MAX_ITERATIONS = 5;
 
+// Escape LIKE/ILIKE metacharacters to prevent pattern injection
+// Ref: https://www.postgresql.org/docs/current/functions-matching.html#FUNCTIONS-LIKE
+function escapeLike(input: string): string {
+  return input.replace(/[%_\\]/g, "\\$&");
+}
+
 // --- Tool schemas (strict: true is set automatically by zodFunction) ---
 
 const LogFoodSchema = z.object({
@@ -210,7 +216,7 @@ async function executeTool(
         .from("meal_logs")
         .select("id, parsed_meal_name, logged_at")
         .eq("user_id", userId)
-        .ilike("parsed_meal_name", `%${args.meal_name_hint}%`)
+        .ilike("parsed_meal_name", `%${escapeLike(args.meal_name_hint)}%`)
         .order("created_at", { ascending: false })
         .limit(1);
 
@@ -239,7 +245,7 @@ async function executeTool(
         .from("meal_logs")
         .select("id, parsed_meal_name, logged_at")
         .eq("user_id", userId)
-        .ilike("parsed_meal_name", `%${args.meal_name_hint}%`)
+        .ilike("parsed_meal_name", `%${escapeLike(args.meal_name_hint)}%`)
         .order("created_at", { ascending: false })
         .limit(1);
 

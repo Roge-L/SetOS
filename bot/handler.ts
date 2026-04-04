@@ -2,7 +2,6 @@ import { runAgent } from "@/bot/agent";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { transcribeAudio } from "@/services/openai/transcribe";
 import { downloadTelegramFile, uploadMealImage } from "@/bot/telegram-api";
-import { estimateMeal } from "@/services/openai/estimate-meal";
 import { logFood } from "@/services/food-logger";
 
 interface TelegramMessage {
@@ -119,5 +118,3 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     await sendMessage(chatId, "Something went wrong. Try again.");
   }
 }
-
-export { sendMessage };

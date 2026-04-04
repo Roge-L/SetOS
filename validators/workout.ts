@@ -21,14 +21,6 @@ export const ParsedExerciseSchema = z.object({
 
 export type ParsedExercise = z.infer<typeof ParsedExerciseSchema>;
 
-export const WorkoutParseResultSchema = z.object({
-  exercises: z.array(ParsedExerciseSchema),
-  raw_input: z.string(),
-  used_llm: z.boolean().default(false),
-});
-
-export type WorkoutParseResult = z.infer<typeof WorkoutParseResultSchema>;
-
 // LLM fallback response schema
 export const LLMWorkoutResponseSchema = z.object({
   exercises: z.array(

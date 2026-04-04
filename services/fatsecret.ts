@@ -1,13 +1,10 @@
 const TOKEN_URL = "https://oauth.fatsecret.com/connect/token";
 const API_URL = "https://platform.fatsecret.com/rest/server.api";
 
-let cachedToken: { token: string; expiresAt: number } | null = null;
-
+// No token caching — Cloudflare Workers don't persist module state between requests.
+// Each request fetches a fresh token. FatSecret tokens last 24h but that doesn't help here.
+// Ref: https://github.com/cloudflare/workerd/issues/2328
 async function getToken(): Promise<string> {
-  if (cachedToken && Date.now() < cachedToken.expiresAt) {
-    return cachedToken.token;
-  }
-
   const credentials = btoa(
     `${process.env.FATSECRET_ID}:${process.env.FATSECRET_SECRET}`
   );
@@ -24,12 +21,7 @@ async function getToken(): Promise<string> {
   if (!res.ok) throw new Error(`FatSecret token error: ${res.status}`);
 
   const data = await res.json();
-  cachedToken = {
-    token: data.access_token,
-    // Refresh 5 min before expiry
-    expiresAt: Date.now() + (data.expires_in - 300) * 1000,
-  };
-  return cachedToken.token;
+  return data.access_token;
 }
 
 interface FatSecretFood {
@@ -63,7 +55,7 @@ interface FatSecretNutrition {
   fiber_g: number;
 }
 
-export async function searchFatSecret(
+async function searchFatSecret(
   query: string
 ): Promise<FatSecretFood[]> {
   const token = await getToken();
@@ -90,7 +82,7 @@ export async function searchFatSecret(
   return foods;
 }
 
-export async function getFatSecretNutrition(
+async function getFatSecretNutrition(
   foodId: string
 ): Promise<FatSecretNutrition | null> {
   const token = await getToken();
