@@ -20,7 +20,7 @@ import {
   logStructuredExercise,
 } from "@/services/workout-logger";
 import { recalculateDailyTotals } from "@/services/daily-totals";
-import { todayDate, dateInTimezone, getUTCRangeForLocalDate } from "@/lib/utils";
+import { todayDate, dateInTimezone, getUTCRangeForLocalDate, formatSets } from "@/lib/utils";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
 const MAX_ITERATIONS = 5;
@@ -29,40 +29,6 @@ const MAX_ITERATIONS = 5;
 // Ref: https://www.postgresql.org/docs/current/functions-matching.html#FUNCTIONS-LIKE
 function escapeLike(input: string): string {
   return input.replace(/[%_\\]/g, "\\$&");
-}
-
-// Format sets in standard gym notation:
-// - All same weight & reps: "4x10 @ 35 lbs"
-// - Same weight, diff reps: "35 lbs x 10, 10, 8, 6"
-// - No weight: "4x10" or "10, 10, 8"
-// - Mixed weights: "135x5, 185x5, 225x3"
-function formatSets(sets: { reps: number | null; weight: number | null; unit?: string }[]): string {
-  if (sets.length === 0) return "—";
-
-  const weights = sets.map((s) => s.weight);
-  const reps = sets.map((s) => s.reps);
-  const unit = sets[0]?.unit || "lb";
-  const allSameWeight = weights.every((w) => w === weights[0]);
-  const allSameReps = reps.every((r) => r === reps[0]);
-
-  if (allSameWeight && allSameReps && reps[0]) {
-    const base = `${sets.length}x${reps[0]}`;
-    return weights[0] ? `${base} @ ${weights[0]} ${unit}` : base;
-  }
-
-  if (allSameWeight && weights[0]) {
-    return `${weights[0]} ${unit} x ${reps.map((r) => r ?? "—").join(", ")}`;
-  }
-
-  return sets
-    .map((s) =>
-      s.weight && s.reps
-        ? `${s.weight}x${s.reps}`
-        : s.reps
-          ? `${s.reps} reps`
-          : "—"
-    )
-    .join(", ");
 }
 
 // --- Tool schemas (strict: true is set automatically by zodFunction) ---
@@ -240,11 +206,14 @@ async function executeTool(
     }
 
     case "move_meal": {
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
       const { data: meals } = await supabase
         .from("meal_logs")
         .select("id, parsed_meal_name, logged_at")
         .eq("user_id", userId)
         .ilike("parsed_meal_name", `%${escapeLike(args.meal_name_hint)}%`)
+        .gte("logged_at", weekAgo.toISOString())
         .order("created_at", { ascending: false })
         .limit(1);
 
@@ -269,11 +238,14 @@ async function executeTool(
     }
 
     case "delete_meal": {
+      const weekAgo2 = new Date();
+      weekAgo2.setDate(weekAgo2.getDate() - 7);
       const { data: meals } = await supabase
         .from("meal_logs")
         .select("id, parsed_meal_name, logged_at")
         .eq("user_id", userId)
         .ilike("parsed_meal_name", `%${escapeLike(args.meal_name_hint)}%`)
+        .gte("logged_at", weekAgo2.toISOString())
         .order("created_at", { ascending: false })
         .limit(1);
 
@@ -290,46 +262,46 @@ async function executeTool(
     case "move_workout": {
       const { data: workouts } = await supabase
         .from("workout_sessions")
-        .select("id, title")
+        .select("id, title, date")
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(10);
 
-      const workout =
-        workouts?.find(
-          (w) =>
-            w.title?.toLowerCase().includes(args.workout_hint.toLowerCase())
-        ) || workouts?.[0];
+      const workout = workouts?.find(
+        (w) =>
+          w.title?.toLowerCase().includes(args.workout_hint.toLowerCase()) ||
+          w.date === args.workout_hint
+      );
 
-      if (!workout) return `No workout found matching "${args.workout_hint}"`;
+      if (!workout) return `No workout found matching "${args.workout_hint}". Recent workouts: ${workouts?.map((w) => `"${w.title || "Untitled"}" (${w.date})`).join(", ") || "none"}`;
 
       await supabase
         .from("workout_sessions")
         .update({ date: args.target_date })
         .eq("id", workout.id);
 
-      return `Moved workout "${workout.title || "Untitled"}" to ${args.target_date}`;
+      return `Moved workout "${workout.title || "Untitled"}" (${workout.date}) to ${args.target_date}`;
     }
 
     case "delete_workout": {
       const { data: workouts } = await supabase
         .from("workout_sessions")
-        .select("id, title")
+        .select("id, title, date")
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(10);
 
-      const workout =
-        workouts?.find(
-          (w) =>
-            w.title?.toLowerCase().includes(args.workout_hint.toLowerCase())
-        ) || workouts?.[0];
+      const workout = workouts?.find(
+        (w) =>
+          w.title?.toLowerCase().includes(args.workout_hint.toLowerCase()) ||
+          w.date === args.workout_hint
+      );
 
-      if (!workout) return `No workout found matching "${args.workout_hint}"`;
+      if (!workout) return `No workout found matching "${args.workout_hint}". Recent workouts: ${workouts?.map((w) => `"${w.title || "Untitled"}" (${w.date})`).join(", ") || "none"}`;
 
       await supabase.from("workout_sessions").delete().eq("id", workout.id);
 
-      return `Deleted workout "${workout.title || "Untitled"}"`;
+      return `Deleted workout "${workout.title || "Untitled"}" (${workout.date})`;
     }
 
     default:
@@ -387,8 +359,9 @@ async function buildContext(userId: string): Promise<string> {
         `)
         .eq("user_id", userId)
         .eq("date", today)
+        .order("created_at", { ascending: false })
         .limit(1)
-        .single(),
+        .maybeSingle(),
     ]);
 
   let ctx = `Today: ${today}. Yesterday: ${yesterdayStr}.\n\n`;

@@ -88,3 +88,37 @@ export function formatDateLong(date: string): string {
     day: "numeric",
   });
 }
+
+// Format workout sets in standard gym notation:
+// - All same weight & reps: "4x10 @ 35 lb"
+// - Same weight, diff reps: "35 lb x 10, 10, 8, 6"
+// - No weight: "4x10" or "10, 10, 8"
+// - Mixed weights: "135x5, 185x5, 225x3"
+export function formatSets(sets: { reps: number | null; weight: number | null; unit?: string }[]): string {
+  if (sets.length === 0) return "—";
+
+  const weights = sets.map((s) => s.weight);
+  const reps = sets.map((s) => s.reps);
+  const unit = sets[0]?.unit || "lb";
+  const allSameWeight = weights.every((w) => w === weights[0]);
+  const allSameReps = reps.every((r) => r === reps[0]);
+
+  if (allSameWeight && allSameReps && reps[0]) {
+    const base = `${sets.length}x${reps[0]}`;
+    return weights[0] ? `${base} @ ${weights[0]} ${unit}` : base;
+  }
+
+  if (allSameWeight && weights[0]) {
+    return `${weights[0]} ${unit} x ${reps.map((r) => r ?? "—").join(", ")}`;
+  }
+
+  return sets
+    .map((s) =>
+      s.weight && s.reps
+        ? `${s.weight}x${s.reps}`
+        : s.reps
+          ? `${s.reps} reps`
+          : "—"
+    )
+    .join(", ");
+}

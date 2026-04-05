@@ -93,8 +93,7 @@ export async function logStructuredExercise(input: LogStructuredInput) {
   let setNumber = (lastSet?.set_number ?? 0) + 1;
 
   if (input.is_cardio) {
-    // Single set with duration
-    await supabase
+    const { error } = await supabase
       .from("workout_sets")
       .insert({
         workout_exercise_id: exerciseId,
@@ -105,8 +104,8 @@ export async function logStructuredExercise(input: LogStructuredInput) {
         duration_seconds: input.duration_minutes ? input.duration_minutes * 60 : null,
         notes: input.notes,
       });
+    if (error) throw new Error(`Failed to insert cardio set: ${error.message}`);
   } else {
-    // Insert each set
     const setsToInsert = input.sets.map((s) => ({
       workout_exercise_id: exerciseId,
       set_number: setNumber++,
@@ -121,5 +120,23 @@ export async function logStructuredExercise(input: LogStructuredInput) {
       .from("workout_sets")
       .insert(setsToInsert);
     if (error) throw new Error(`Failed to insert sets: ${error.message}`);
+  }
+
+  // Auto-title session from exercises
+  const { data: allExercises } = await supabase
+    .from("workout_exercises")
+    .select("normalized_exercise_name")
+    .eq("workout_session_id", input.sessionId)
+    .order("sort_order");
+
+  if (allExercises?.length) {
+    const title = allExercises
+      .map((e) => e.normalized_exercise_name)
+      .slice(0, 3)
+      .join(", ");
+    await supabase
+      .from("workout_sessions")
+      .update({ title })
+      .eq("id", input.sessionId);
   }
 }
