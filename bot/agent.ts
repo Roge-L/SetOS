@@ -182,11 +182,19 @@ async function executeTool(
         date: args.date ?? undefined,
       });
       const est = result.estimation;
-      return `Logged: ${est.parsed_meal_name} — ${est.estimated_calories} cal | P: ${Math.round(est.estimated_protein_g)}g | C: ${Math.round(est.estimated_carbs_g)}g | F: ${Math.round(est.estimated_fat_g)}g${est.estimated_fiber_g > 0 ? ` | Fiber: ${Math.round(est.estimated_fiber_g)}g` : ""} (${est.confidence} confidence, source: ${result.source})`;
+      const today = todayDate();
+      const datePrefix = result.date !== today ? `[${result.date}] ` : "";
+      let response = `${datePrefix}Logged: ${est.parsed_meal_name} — ${est.estimated_calories} cal | P: ${Math.round(est.estimated_protein_g)}g | C: ${Math.round(est.estimated_carbs_g)}g | F: ${Math.round(est.estimated_fat_g)}g`;
+      if (result.dailyTotals) {
+        const t = result.dailyTotals;
+        response += `\nDay total: ${t.calories} cal | P: ${Math.round(t.protein_g)}g | C: ${Math.round(t.carbs_g)}g | F: ${Math.round(t.fat_g)}g`;
+      }
+      return response;
     }
 
     case "log_workout_sets": {
-      const session = await getSessionForDate(userId, args.date ?? undefined);
+      const targetDate = args.date ?? undefined;
+      const session = await getSessionForDate(userId, targetDate);
       const currentExercise = await getLastExerciseName(session.id);
       const result = await logWorkoutExercises({
         userId,
@@ -196,8 +204,10 @@ async function executeTool(
         defaultWeight: args.weight ?? undefined,
       });
       if (result.exercises.length === 0) {
-        return "Couldn't parse workout sets. Try a format like: bench 185x8, or 10 10 8";
+        return `Couldn't parse "${args.text}". Try: "bench 5x5 at 225" or "squat 185 8 8 6" or "ran 25 min"`;
       }
+      const today = todayDate();
+      const datePrefix = (targetDate && targetDate !== today) ? `[${targetDate}] ` : "";
       return result.exercises
         .map((ex) => {
           if (ex.is_cardio) {
@@ -205,9 +215,9 @@ async function executeTool(
             const mins = s?.duration_seconds
               ? Math.round(s.duration_seconds / 60)
               : "?";
-            return `Logged: ${ex.normalized_exercise_name} — ${mins} min${s?.notes ? " " + s.notes : ""}`;
+            return `${datePrefix}Logged: ${ex.normalized_exercise_name} — ${mins} min${s?.notes ? " " + s.notes : ""}`;
           }
-          return `Logged: ${ex.normalized_exercise_name} — ${formatSets(ex.sets)}`;
+          return `${datePrefix}Logged: ${ex.normalized_exercise_name} — ${formatSets(ex.sets)}`;
         })
         .join("\n");
     }
@@ -322,11 +332,11 @@ async function buildContext(userId: string): Promise<string> {
   const todayRange = getUTCRangeForLocalDate(today);
   const yesterdayRange = getUTCRangeForLocalDate(yesterdayStr);
 
-  const [mealsToday, mealsYesterday, workoutsRecent] =
+  const [mealsToday, mealsYesterday, todayTotals, workoutsRecent, todayExercises] =
     await Promise.all([
       supabase
         .from("meal_logs")
-        .select("parsed_meal_name, logged_at")
+        .select("parsed_meal_name, estimated_calories, logged_at")
         .eq("user_id", userId)
         .gte("logged_at", todayRange.start)
         .lte("logged_at", todayRange.end)
@@ -339,18 +349,42 @@ async function buildContext(userId: string): Promise<string> {
         .lte("logged_at", yesterdayRange.end)
         .order("logged_at"),
       supabase
+        .from("daily_nutrition_totals")
+        .select("calories, protein_g, carbs_g, fat_g")
+        .eq("user_id", userId)
+        .eq("date", today)
+        .single(),
+      supabase
         .from("workout_sessions")
         .select("title, date")
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(5),
+      supabase
+        .from("workout_sessions")
+        .select(`
+          workout_exercises (
+            normalized_exercise_name,
+            workout_sets ( reps, weight, unit )
+          )
+        `)
+        .eq("user_id", userId)
+        .eq("date", today)
+        .limit(1)
+        .single(),
     ]);
 
   let ctx = `Today: ${today}. Yesterday: ${yesterdayStr}.\n\n`;
 
+  // Daily totals
+  const t = todayTotals.data;
+  if (t) {
+    ctx += `Today's totals: ${t.calories} cal | P: ${Math.round(t.protein_g)}g | C: ${Math.round(t.carbs_g)}g | F: ${Math.round(t.fat_g)}g\n\n`;
+  }
+
   ctx += "Today's meals:\n";
   for (const m of mealsToday.data || []) {
-    ctx += `- ${m.parsed_meal_name}\n`;
+    ctx += `- ${m.parsed_meal_name} (${m.estimated_calories} cal)\n`;
   }
   if (!mealsToday.data?.length) ctx += "- (none)\n";
 
@@ -359,6 +393,18 @@ async function buildContext(userId: string): Promise<string> {
     ctx += `- ${m.parsed_meal_name}\n`;
   }
   if (!mealsYesterday.data?.length) ctx += "- (none)\n";
+
+  // Today's exercises (so agent knows current exercise for bare rep logging)
+  const todayExs = todayExercises.data?.workout_exercises;
+  if (todayExs?.length) {
+    ctx += "\nToday's exercises:\n";
+    for (const ex of todayExs) {
+      const sets = ex.workout_sets
+        .map((s: any) => s.weight ? `${s.weight}x${s.reps}` : `${s.reps} reps`)
+        .join(", ");
+      ctx += `- ${ex.normalized_exercise_name}: ${sets}\n`;
+    }
+  }
 
   ctx += "\nRecent workouts:\n";
   for (const w of workoutsRecent.data || []) {

@@ -20,10 +20,19 @@ interface LogFoodInput {
   date?: string; // YYYY-MM-DD, defaults to today
 }
 
+interface DailyTotals {
+  calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+}
+
 interface LogFoodResult {
   estimation: MealEstimation;
   mealLogId: string;
   source: "fatsecret" | "openfoodfacts" | "openai-web" | "openai";
+  date: string;
+  dailyTotals: DailyTotals | null;
 }
 
 function determineSourceType(input: LogFoodInput): SourceType {
@@ -175,5 +184,19 @@ export async function logFood(input: LogFoodInput): Promise<LogFoodResult> {
   // Recalculate daily totals for the target date
   await recalculateDailyTotals(input.userId, targetDate);
 
-  return { estimation, mealLogId: data.id, source };
+  // Fetch updated daily totals
+  const { data: totals } = await supabase
+    .from("daily_nutrition_totals")
+    .select("calories, protein_g, carbs_g, fat_g")
+    .eq("user_id", input.userId)
+    .eq("date", targetDate)
+    .single();
+
+  return {
+    estimation,
+    mealLogId: data.id,
+    source,
+    date: targetDate,
+    dailyTotals: totals,
+  };
 }
