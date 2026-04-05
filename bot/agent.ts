@@ -17,8 +17,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { logFood } from "@/services/food-logger";
 import {
   getSessionForDate,
-  logWorkoutExercises,
-  getLastExerciseName,
+  logStructuredExercise,
 } from "@/services/workout-logger";
 import { recalculateDailyTotals } from "@/services/daily-totals";
 import { todayDate, dateInTimezone, getUTCRangeForLocalDate } from "@/lib/utils";
@@ -80,19 +79,47 @@ const LogFoodSchema = z.object({
     ),
 });
 
-const LogWorkoutSetsSchema = z.object({
-  text: z.string().describe("The workout sets text exactly as the user said it"),
+const WorkoutSetSchema = z.object({
+  reps: z
+    .number()
+    .nullable()
+    .describe("Number of reps. Null for cardio."),
   weight: z
     .number()
     .nullable()
+    .describe("Weight in the specified unit. Null if bodyweight or cardio."),
+});
+
+const LogWorkoutSchema = z.object({
+  exercise: z
+    .string()
     .describe(
-      "Weight in lbs if the user mentioned one (e.g. 225, 135). Null if no weight mentioned. Extract from any format: '225 lbs', 'at 225', 'with 225', etc."
+      'Normalized exercise name. Use standard names: "Bench Press", "Squat", "Deadlift", "Overhead Press", "Barbell Row", "Incline DB Press", "Lat Pulldown", "Pull-up", "Bicep Curl", "Tricep Pushdown", "Leg Press", "Run", etc.'
     ),
+  sets: z
+    .array(WorkoutSetSchema)
+    .describe(
+      'Array of sets. "5x5 at 225" = 5 objects each with reps:5, weight:225. "185 8 8 6" = [{reps:8,weight:185},{reps:8,weight:185},{reps:6,weight:185}]. "10 10 8" with no weight = [{reps:10,weight:null},...]'
+    ),
+  unit: z
+    .enum(["lb", "kg"])
+    .describe("Weight unit. Default to lb unless user says kg."),
+  is_cardio: z
+    .boolean()
+    .describe("True for cardio exercises (run, walk, bike, etc.)"),
+  duration_minutes: z
+    .number()
+    .nullable()
+    .describe("Duration in minutes for cardio. Null for non-cardio."),
+  notes: z
+    .string()
+    .nullable()
+    .describe('Optional notes like "easy", "felt heavy", "PR". Null if none.'),
   date: z
     .string()
     .nullable()
     .describe(
-      "Date in YYYY-MM-DD format if the user mentioned a specific day (e.g. 'last night', 'on tuesday', 'april 3rd'). Null if no date mentioned (defaults to today)."
+      "Date in YYYY-MM-DD format if the user mentioned a specific day. Null = today."
     ),
 });
 
@@ -134,10 +161,10 @@ const TOOLS = [
       "Log a food entry. Call when the user mentions eating or drinking something. Pass their exact description.",
   }),
   zodFunction({
-    name: "log_workout_sets",
-    parameters: LogWorkoutSetsSchema,
+    name: "log_workout",
+    parameters: LogWorkoutSchema,
     description:
-      'Log workout sets. Call when the user describes exercises, sets, reps, or cardio. Examples: "bench 5x5 at 225", "ran 25 min", "squat 315 5 5 3". Always extract the weight if mentioned. Sets are added to today\'s workout automatically.',
+      'Log a single exercise with sets. Extract exercise name, each set\'s reps and weight, and unit. Call once per exercise. "bench 5x5 225" = exercise:"Bench Press", 5 sets of reps:5 weight:225. "ran 25 min" = exercise:"Run", is_cardio:true, duration_minutes:25. Plate math: "plate" = 135lb, "plate and 25" = 185lb, "2 plates" = 225lb.',
   }),
   zodFunction({
     name: "move_meal",
@@ -192,34 +219,24 @@ async function executeTool(
       return response;
     }
 
-    case "log_workout_sets": {
+    case "log_workout": {
       const targetDate = args.date ?? undefined;
       const session = await getSessionForDate(userId, targetDate);
-      const currentExercise = await getLastExerciseName(session.id);
-      const result = await logWorkoutExercises({
-        userId,
+      await logStructuredExercise({
         sessionId: session.id,
-        text: args.text,
-        currentExercise,
-        defaultWeight: args.weight ?? undefined,
+        exercise: args.exercise,
+        sets: args.sets,
+        unit: args.unit,
+        is_cardio: args.is_cardio,
+        duration_minutes: args.duration_minutes,
+        notes: args.notes,
       });
-      if (result.exercises.length === 0) {
-        return `Couldn't parse "${args.text}". Try: "bench 5x5 at 225" or "squat 185 8 8 6" or "ran 25 min"`;
-      }
       const today = todayDate();
       const datePrefix = (targetDate && targetDate !== today) ? `[${targetDate}] ` : "";
-      return result.exercises
-        .map((ex) => {
-          if (ex.is_cardio) {
-            const s = ex.sets[0];
-            const mins = s?.duration_seconds
-              ? Math.round(s.duration_seconds / 60)
-              : "?";
-            return `${datePrefix}Logged: ${ex.normalized_exercise_name} — ${mins} min${s?.notes ? " " + s.notes : ""}`;
-          }
-          return `${datePrefix}Logged: ${ex.normalized_exercise_name} — ${formatSets(ex.sets)}`;
-        })
-        .join("\n");
+      if (args.is_cardio) {
+        return `${datePrefix}Logged: ${args.exercise} — ${args.duration_minutes ?? "?"} min${args.notes ? " " + args.notes : ""}`;
+      }
+      return `${datePrefix}Logged: ${args.exercise} — ${formatSets(args.sets)}`;
     }
 
     case "move_meal": {
@@ -421,7 +438,7 @@ You have tools to: log food, log workout sets, move entries between dates, and d
 
 Rules:
 - When the user mentions eating or drinking something, call log_food with their exact description. If they mention a specific day ("last night", "on tuesday", "april 3rd"), set the date field to the resolved YYYY-MM-DD. Otherwise leave date null (defaults to today).
-- When the user sends workout data (exercises, sets, reps, weight, cardio), call log_workout_sets. Always extract the weight if mentioned. If they mention a specific day, set the date field. Otherwise leave date null (defaults to today).
+- When the user sends workout data, call log_workout once per exercise. Extract the exercise name, each set's reps and weight, and unit. For multiple exercises in one message, call log_workout multiple times. If they mention a specific day, set the date field. "plate" = 135lb, "plate and 25" = 185lb, "2 plates" = 225lb, "60s" = 60lb dumbbells.
 - When the user wants to correct dates ("was actually yesterday", "move X to april 2"), call the appropriate move tool. Convert "yesterday"/"last night" to the actual YYYY-MM-DD date.
 - When the user wants to delete something, call the appropriate delete tool.
 - You may call multiple tools in one turn if the user asks for multiple corrections.

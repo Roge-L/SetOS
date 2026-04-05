@@ -28,7 +28,6 @@ services/       → Core business logic
   ├── fatsecret.ts        → FatSecret API client (restaurant + branded foods)
   ├── openfoodfacts.ts    → Open Food Facts client (packaged products)
   ├── food-logger.ts      → Food logging orchestrator (multi-source pipeline)
-  ├── workout-parser.ts   → Deterministic workout parser
   ├── workout-logger.ts   → Workout session/set management
   └── daily-totals.ts     → Nutrition totals recalculation
 bot/            → Telegram bot: LLM agent (agent.ts) + webhook handler
@@ -79,7 +78,7 @@ The agent uses a manual loop pattern ([ref](https://developers.openai.com/cookbo
 | Tool | Trigger |
 |------|---------|
 | `log_food` | User mentions eating/drinking something |
-| `log_workout_sets` | User sends exercise data (auto-creates today's session) |
+| `log_workout` | User sends exercise data (structured extraction, one call per exercise) |
 | `move_meal` | "the eggs were actually yesterday" |
 | `delete_meal` | "delete the string cheese" |
 | `move_workout` | "the workout was last night" |
@@ -97,7 +96,7 @@ The agent can call **multiple tools in one turn** — e.g., "the workout was yes
 
 **Food estimation pipeline:** (see table above) FatSecret → Open Food Facts → OpenAI web search → OpenAI fallback
 
-**Workout logging:** Agent calls `log_workout_sets` → deterministic parser tries first → LLM fallback if ambiguous → auto-creates session if needed → saves exercises and sets
+**Workout logging:** Agent extracts structured data (exercise name, sets, reps, weight) directly from the user's message → writes to DB. One tool call per exercise — no parser layer.
 
 **Dashboard:** Server components fetch today's totals, meals, workouts, and body weight from Supabase (RLS enforced per user).
 

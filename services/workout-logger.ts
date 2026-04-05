@@ -1,20 +1,19 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { parseWorkoutMessage } from "@/services/workout-parser";
-import { parseWorkoutWithLLM } from "@/services/openai/parse-workout";
 import { todayDate } from "@/lib/utils";
-import type { ParsedExercise } from "@/validators/workout";
 
-interface LogWorkoutInput {
-  userId: string;
-  sessionId: string;
-  text: string;
-  currentExercise?: string | null;
-  defaultWeight?: number;
+interface StructuredSet {
+  reps: number | null;
+  weight: number | null;
 }
 
-interface LogWorkoutResult {
-  exercises: ParsedExercise[];
-  usedLLM: boolean;
+interface LogStructuredInput {
+  sessionId: string;
+  exercise: string;
+  sets: StructuredSet[];
+  unit: "lb" | "kg";
+  is_cardio: boolean;
+  duration_minutes: number | null;
+  notes: string | null;
 }
 
 // Get or create a workout session for a given date (defaults to today)
@@ -42,124 +41,85 @@ export async function getSessionForDate(userId: string, date?: string) {
   return data;
 }
 
-export async function getLastExerciseName(
-  sessionId: string
-): Promise<string | null> {
-  const supabase = createAdminClient();
-  const { data } = await supabase
-    .from("workout_exercises")
-    .select("normalized_exercise_name")
-    .eq("workout_session_id", sessionId)
-    .order("sort_order", { ascending: false })
-    .limit(1)
-    .single();
-  return data?.normalized_exercise_name || null;
-}
-
-export async function logWorkoutExercises(
-  input: LogWorkoutInput
-): Promise<LogWorkoutResult> {
-  // Try deterministic parsing first
-  let exercises = parseWorkoutMessage(input.text, input.currentExercise);
-  let usedLLM = false;
-
-  // Fall back to LLM if deterministic parsing fails
-  if (!exercises || exercises.length === 0) {
-    try {
-      exercises = await parseWorkoutWithLLM(input.text, input.currentExercise);
-      usedLLM = true;
-    } catch (e) {
-      console.error("LLM workout parsing failed:", e);
-      return { exercises: [], usedLLM: true };
-    }
-  }
-
-  if (!exercises || exercises.length === 0) {
-    return { exercises: [], usedLLM };
-  }
-
-  // Apply default weight to any sets that don't have one
-  if (input.defaultWeight) {
-    for (const ex of exercises) {
-      if (ex.is_cardio) continue;
-      for (const s of ex.sets) {
-        if (s.weight === null || s.weight === undefined) {
-          s.weight = input.defaultWeight;
-        }
-      }
-    }
-  }
-
+export async function logStructuredExercise(input: LogStructuredInput) {
   const supabase = createAdminClient();
 
-  // Get current max sort_order
-  const { data: lastEx } = await supabase
+  // Get or create the exercise entry for this session
+  const { data: existingEx } = await supabase
     .from("workout_exercises")
-    .select("sort_order")
+    .select("id")
     .eq("workout_session_id", input.sessionId)
-    .order("sort_order", { ascending: false })
+    .eq("normalized_exercise_name", input.exercise)
     .limit(1)
     .single();
-  let sortOrder = (lastEx?.sort_order ?? -1) + 1;
 
-  for (const ex of exercises) {
-    // Check if this exercise already exists in the session
-    const { data: existingEx } = await supabase
+  let exerciseId: string;
+
+  if (existingEx) {
+    exerciseId = existingEx.id;
+  } else {
+    // Get next sort_order
+    const { data: lastEx } = await supabase
       .from("workout_exercises")
-      .select("id")
+      .select("sort_order")
       .eq("workout_session_id", input.sessionId)
-      .eq("normalized_exercise_name", ex.normalized_exercise_name)
+      .order("sort_order", { ascending: false })
       .limit(1)
       .single();
+    const sortOrder = (lastEx?.sort_order ?? -1) + 1;
 
-    let exerciseId: string;
+    const { data: newEx, error } = await supabase
+      .from("workout_exercises")
+      .insert({
+        workout_session_id: input.sessionId,
+        exercise_name: input.exercise,
+        normalized_exercise_name: input.exercise,
+        sort_order: sortOrder,
+      })
+      .select("id")
+      .single();
+    if (error) throw new Error(`Failed to insert exercise: ${error.message}`);
+    exerciseId = newEx.id;
+  }
 
-    if (existingEx) {
-      exerciseId = existingEx.id;
-    } else {
-      const { data: newEx, error } = await supabase
-        .from("workout_exercises")
-        .insert({
-          workout_session_id: input.sessionId,
-          exercise_name: ex.exercise_name,
-          normalized_exercise_name: ex.normalized_exercise_name,
-          sort_order: sortOrder++,
-        })
-        .select("id")
-        .single();
-      if (error) throw new Error(`Failed to insert exercise: ${error.message}`);
-      exerciseId = newEx.id;
-    }
+  // Get next set_number
+  const { data: lastSet } = await supabase
+    .from("workout_sets")
+    .select("set_number")
+    .eq("workout_exercise_id", exerciseId)
+    .order("set_number", { ascending: false })
+    .limit(1)
+    .single();
+  let setNumber = (lastSet?.set_number ?? 0) + 1;
 
-    // Get current max set_number for this exercise
-    const { data: lastSet } = await supabase
+  if (input.is_cardio) {
+    // Single set with duration
+    await supabase
       .from("workout_sets")
-      .select("set_number")
-      .eq("workout_exercise_id", exerciseId)
-      .order("set_number", { ascending: false })
-      .limit(1)
-      .single();
-    let setNumber = (lastSet?.set_number ?? 0) + 1;
-
-    // Insert sets
-    const setsToInsert = ex.sets.map((s) => ({
+      .insert({
+        workout_exercise_id: exerciseId,
+        set_number: setNumber,
+        reps: null,
+        weight: null,
+        unit: input.unit,
+        duration_seconds: input.duration_minutes ? input.duration_minutes * 60 : null,
+        notes: input.notes,
+      });
+  } else {
+    // Insert each set
+    const setsToInsert = input.sets.map((s) => ({
       workout_exercise_id: exerciseId,
       set_number: setNumber++,
       reps: s.reps,
       weight: s.weight,
-      unit: s.unit || "lb",
-      duration_seconds: s.duration_seconds || null,
-      distance: s.distance || null,
-      rir: s.rir || null,
-      notes: s.notes || null,
+      unit: input.unit,
+      duration_seconds: null,
+      notes: input.notes,
     }));
 
-    const { error: setsError } = await supabase
+    const { error } = await supabase
       .from("workout_sets")
       .insert(setsToInsert);
-    if (setsError)
-      throw new Error(`Failed to insert sets: ${setsError.message}`);
+    if (error) throw new Error(`Failed to insert sets: ${error.message}`);
   }
-
-  return { exercises, usedLLM };
 }
