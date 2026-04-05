@@ -17,16 +17,16 @@ interface LogWorkoutResult {
   usedLLM: boolean;
 }
 
-// Get or create today's workout session
-export async function getTodaySession(userId: string) {
+// Get or create a workout session for a given date (defaults to today)
+export async function getSessionForDate(userId: string, date?: string) {
   const supabase = createAdminClient();
-  const today = todayDate();
+  const targetDate = date || todayDate();
 
   const { data: existing } = await supabase
     .from("workout_sessions")
     .select("*")
     .eq("user_id", userId)
-    .eq("date", today)
+    .eq("date", targetDate)
     .order("created_at", { ascending: false })
     .limit(1)
     .single();
@@ -35,7 +35,7 @@ export async function getTodaySession(userId: string) {
 
   const { data, error } = await supabase
     .from("workout_sessions")
-    .insert({ user_id: userId, date: today })
+    .insert({ user_id: userId, date: targetDate })
     .select()
     .single();
   if (error) throw new Error(`Failed to create workout session: ${error.message}`);

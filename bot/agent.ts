@@ -16,7 +16,7 @@ import { getOpenAI, models } from "@/lib/openai";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logFood } from "@/services/food-logger";
 import {
-  getTodaySession,
+  getSessionForDate,
   logWorkoutExercises,
   getLastExerciseName,
 } from "@/services/workout-logger";
@@ -72,6 +72,12 @@ const LogFoodSchema = z.object({
   description: z
     .string()
     .describe("The food description exactly as the user said it"),
+  date: z
+    .string()
+    .nullable()
+    .describe(
+      "Date in YYYY-MM-DD format if the user mentioned a specific day (e.g. 'last night', 'on tuesday', 'april 3rd'). Null if no date mentioned (defaults to today)."
+    ),
 });
 
 const LogWorkoutSetsSchema = z.object({
@@ -81,6 +87,12 @@ const LogWorkoutSetsSchema = z.object({
     .nullable()
     .describe(
       "Weight in lbs if the user mentioned one (e.g. 225, 135). Null if no weight mentioned. Extract from any format: '225 lbs', 'at 225', 'with 225', etc."
+    ),
+  date: z
+    .string()
+    .nullable()
+    .describe(
+      "Date in YYYY-MM-DD format if the user mentioned a specific day (e.g. 'last night', 'on tuesday', 'april 3rd'). Null if no date mentioned (defaults to today)."
     ),
 });
 
@@ -167,13 +179,14 @@ async function executeTool(
       const result = await logFood({
         userId,
         text: args.description,
+        date: args.date ?? undefined,
       });
       const est = result.estimation;
       return `Logged: ${est.parsed_meal_name} — ${est.estimated_calories} cal | P: ${Math.round(est.estimated_protein_g)}g | C: ${Math.round(est.estimated_carbs_g)}g | F: ${Math.round(est.estimated_fat_g)}g${est.estimated_fiber_g > 0 ? ` | Fiber: ${Math.round(est.estimated_fiber_g)}g` : ""} (${est.confidence} confidence, source: ${result.source})`;
     }
 
     case "log_workout_sets": {
-      const session = await getTodaySession(userId);
+      const session = await getSessionForDate(userId, args.date ?? undefined);
       const currentExercise = await getLastExerciseName(session.id);
       const result = await logWorkoutExercises({
         userId,
@@ -361,8 +374,8 @@ const SYSTEM_PROMPT = `You are SetOS, a personal calorie/macro and workout track
 You have tools to: log food, log workout sets, move entries between dates, and delete entries.
 
 Rules:
-- When the user mentions eating or drinking something, call log_food with their exact description.
-- When the user sends workout data (exercises, sets, reps, weight, cardio), call log_workout_sets. Always extract the weight if mentioned anywhere in the message. Sets are added to today's workout automatically.
+- When the user mentions eating or drinking something, call log_food with their exact description. If they mention a specific day ("last night", "on tuesday", "april 3rd"), set the date field to the resolved YYYY-MM-DD. Otherwise leave date null (defaults to today).
+- When the user sends workout data (exercises, sets, reps, weight, cardio), call log_workout_sets. Always extract the weight if mentioned. If they mention a specific day, set the date field. Otherwise leave date null (defaults to today).
 - When the user wants to correct dates ("was actually yesterday", "move X to april 2"), call the appropriate move tool. Convert "yesterday"/"last night" to the actual YYYY-MM-DD date.
 - When the user wants to delete something, call the appropriate delete tool.
 - You may call multiple tools in one turn if the user asks for multiple corrections.

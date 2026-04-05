@@ -17,6 +17,7 @@ interface LogFoodInput {
   text?: string | null;
   audioBuffer?: ArrayBuffer | null;
   imageUrl?: string | null;
+  date?: string; // YYYY-MM-DD, defaults to today
 }
 
 interface LogFoodResult {
@@ -138,6 +139,13 @@ export async function logFood(input: LogFoodInput): Promise<LogFoodResult> {
   }
 
   const sourceType = determineSourceType(input);
+  const targetDate = input.date || todayDate();
+
+  // Build logged_at: use target date with current time
+  const now = new Date();
+  const loggedAt = input.date
+    ? `${input.date}T${now.toISOString().slice(11)}`
+    : now.toISOString();
 
   // Save to database
   const supabase = createAdminClient();
@@ -145,7 +153,7 @@ export async function logFood(input: LogFoodInput): Promise<LogFoodResult> {
     .from("meal_logs")
     .insert({
       user_id: input.userId,
-      logged_at: new Date().toISOString(),
+      logged_at: loggedAt,
       source_type: sourceType,
       raw_text: input.text || null,
       transcript_text: transcript,
@@ -164,8 +172,8 @@ export async function logFood(input: LogFoodInput): Promise<LogFoodResult> {
 
   if (error) throw new Error(`Failed to save meal log: ${error.message}`);
 
-  // Recalculate daily totals using local timezone date
-  await recalculateDailyTotals(input.userId, todayDate());
+  // Recalculate daily totals for the target date
+  await recalculateDailyTotals(input.userId, targetDate);
 
   return { estimation, mealLogId: data.id, source };
 }
