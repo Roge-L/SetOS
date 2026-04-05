@@ -321,7 +321,7 @@ async function buildContext(userId: string): Promise<string> {
   const todayRange = getUTCRangeForLocalDate(today);
   const yesterdayRange = getUTCRangeForLocalDate(yesterdayStr);
 
-  const [mealsToday, mealsYesterday, todayTotals, workoutsRecent, todayExercises] =
+  const [mealsToday, mealsYesterday, todayTotals, workoutsRecent, todayExercises, recentExerciseHistory] =
     await Promise.all([
       supabase
         .from("meal_logs")
@@ -362,6 +362,20 @@ async function buildContext(userId: string): Promise<string> {
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
+      // Last 14 days of exercise history for previous performance / PR detection
+      supabase
+        .from("workout_sessions")
+        .select(`
+          date,
+          workout_exercises (
+            normalized_exercise_name,
+            workout_sets ( reps, weight, unit )
+          )
+        `)
+        .eq("user_id", userId)
+        .neq("date", today)
+        .order("date", { ascending: false })
+        .limit(5),
     ]);
 
   let ctx = `Today: ${today}. Yesterday: ${yesterdayStr}.\n\n`;
@@ -396,6 +410,30 @@ async function buildContext(userId: string): Promise<string> {
     }
   }
 
+  // Previous performance per exercise (for PR detection and context)
+  const history = recentExerciseHistory.data || [];
+  const prevPerformance = new Map<string, { date: string; best: string }>();
+  for (const session of history) {
+    for (const ex of (session as any).workout_exercises || []) {
+      const name = ex.normalized_exercise_name;
+      if (prevPerformance.has(name)) continue; // keep most recent only
+      const sets = (ex.workout_sets || []) as { reps: number | null; weight: number | null; unit: string }[];
+      if (sets.length === 0) continue;
+      const maxWeight = Math.max(...sets.map((s: any) => s.weight ?? 0));
+      const maxReps = Math.max(...sets.map((s: any) => s.reps ?? 0));
+      const summary = maxWeight > 0
+        ? `${maxWeight}x${maxReps} (best set), ${sets.length} sets`
+        : `${maxReps} reps (best set), ${sets.length} sets`;
+      prevPerformance.set(name, { date: (session as any).date, best: summary });
+    }
+  }
+  if (prevPerformance.size > 0) {
+    ctx += "\nPrevious performance (for PR comparison):\n";
+    for (const [name, perf] of prevPerformance) {
+      ctx += `- ${name} (${perf.date}): ${perf.best}\n`;
+    }
+  }
+
   ctx += "\nRecent workouts:\n";
   for (const w of workoutsRecent.data || []) {
     ctx += `- ${w.title || "Untitled"} (${w.date})\n`;
@@ -405,19 +443,22 @@ async function buildContext(userId: string): Promise<string> {
   return ctx;
 }
 
-const SYSTEM_PROMPT = `You are SetOS, a personal calorie/macro and workout tracking assistant on Telegram. Be concise.
+const SYSTEM_PROMPT = `You are SetOS, a personal calorie/macro and workout tracking assistant on Telegram.
 
-You have tools to: log food, log workout sets, move entries between dates, and delete entries.
+You MUST keep going until the user's request is completely resolved before responding.
+If you are not sure about file contents, dates, or data, use your tools to look it up — do NOT guess.
+
+You have tools to: log food, log workouts, move entries between dates, and delete entries.
 
 Rules:
 - When the user mentions eating or drinking something, call log_food with their exact description. If they mention a specific day ("last night", "on tuesday", "april 3rd"), set the date field to the resolved YYYY-MM-DD. Otherwise leave date null (defaults to today).
 - When the user sends workout data, call log_workout once per exercise. Extract the exercise name, each set's reps and weight, and unit. For multiple exercises in one message, call log_workout multiple times. If they mention a specific day, set the date field. "plate" = 135lb, "plate and 25" = 185lb, "2 plates" = 225lb, "60s" = 60lb dumbbells.
 - When the user wants to correct dates ("was actually yesterday", "move X to april 2"), call the appropriate move tool. Convert "yesterday"/"last night" to the actual YYYY-MM-DD date.
 - When the user wants to delete something, call the appropriate delete tool.
-- You may call multiple tools in one turn if the user asks for multiple corrections.
 - If the message is just conversational (greeting, thanks, question), respond with text — don't call any tool.
 - Keep responses short. No emojis except where the user uses them.
-- Never ask for confirmation before acting — just do it. The user can undo.`;
+- Never ask for confirmation before acting — just do it. The user can undo.
+- When reporting workout logs, mention if the user hit a PR (personal record) compared to the previous performance shown in context.`;
 
 // --- Main agent entry point ---
 
@@ -449,7 +490,7 @@ export async function runAgent(
       messages,
       tools: TOOLS,
       tool_choice: "auto",
-      parallel_tool_calls: false,
+      parallel_tool_calls: true,
       temperature: 0.1,
     });
 
