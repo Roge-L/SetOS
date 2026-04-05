@@ -32,7 +32,7 @@ services/       → Core business logic
   ├── workout-logger.ts   → Workout session/set management
   └── daily-totals.ts     → Nutrition totals recalculation
 bot/            → Telegram bot: LLM agent (agent.ts) + webhook handler
-  ├── agent.ts  → Smart router: OpenAI function-calling agent with 8 tools
+  ├── agent.ts  → Smart router: OpenAI function-calling agent with 6 tools
   └── handler.ts → Webhook entry point, photo/voice preprocessing
 prompts/        → OpenAI prompt templates
 validators/     → Zod schemas for runtime type safety
@@ -79,9 +79,7 @@ The agent uses a manual loop pattern ([ref](https://developers.openai.com/cookbo
 | Tool | Trigger |
 |------|---------|
 | `log_food` | User mentions eating/drinking something |
-| `log_workout_sets` | User sends exercise data (auto-creates session if needed) |
-| `start_workout` | User explicitly starts a workout |
-| `finish_workout` | User says they're done working out |
+| `log_workout_sets` | User sends exercise data (auto-creates today's session) |
 | `move_meal` | "the eggs were actually yesterday" |
 | `delete_meal` | "delete the string cheese" |
 | `move_workout` | "the workout was last night" |
@@ -190,15 +188,28 @@ Verify:
 curl "https://api.telegram.org/bot<BOT_TOKEN>/getWebhookInfo"
 ```
 
-### 8. Link your Telegram account
+### 8. Add a user
 
-1. Message your bot `/start` — it replies with your **chat ID**
-2. Sign in to the web app to create your Supabase user
-3. Insert a row into `user_aliases` (via Supabase Table Editor):
-   - `user_id`: your Supabase auth user ID
-   - `alias_type`: `telegram`
-   - `alias_key`: your chat ID from step 1
-   - `alias_value_json`: `{}`
+Each user needs a Supabase auth account and a Telegram link.
+
+1. **Create auth user:** Supabase Dashboard → Authentication → Users → **Add user**
+   - Email + password, check **Auto Confirm**
+2. **Get their Telegram chat ID:** Have them message [@userinfobot](https://t.me/userinfobot) on Telegram — it replies with their numeric ID
+3. **Run in Supabase SQL Editor** (replace the two placeholders):
+
+```sql
+insert into public.users (id, email)
+values ('<USER_UUID>', '<EMAIL>')
+on conflict (id) do nothing;
+
+insert into public.user_aliases (user_id, alias_type, alias_key, alias_value_json)
+values ('<USER_UUID>', 'telegram', '<TELEGRAM_CHAT_ID>', '{}');
+```
+
+- `USER_UUID`: the auth user's ID (visible in Authentication → Users)
+- `TELEGRAM_CHAT_ID`: the numeric ID from step 2
+
+The user can now log in to the dashboard and message the Telegram bot.
 
 ---
 
