@@ -16,6 +16,14 @@
       "service": "setos"
     }
   ],
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true
+    }
+  },
   // Environment variables are set via `wrangler secret` or the Cloudflare dashboard.
   // Do NOT put secrets in this file.
   "vars": {}
