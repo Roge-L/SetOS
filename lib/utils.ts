@@ -115,7 +115,7 @@ export function formatSets(sets: { reps: number | null; weight: number | null; u
   return sets
     .map((s) =>
       s.weight && s.reps
-        ? `${s.weight}x${s.reps}`
+        ? `${s.weight}${unit} x ${s.reps}`
         : s.reps
           ? `${s.reps} reps`
           : "—"

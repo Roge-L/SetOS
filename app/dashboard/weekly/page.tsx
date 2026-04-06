@@ -57,14 +57,15 @@ export default async function WeeklyPage() {
     totals.reduce((sum, d) => sum + d.fat_g, 0) / daysWithData
   );
 
+  const validWeights = weights.filter((w) => w.body_weight != null);
   const weightTrend =
-    weights.length >= 2
+    validWeights.length >= 2
       ? {
-          start: weights[0].body_weight,
-          end: weights[weights.length - 1].body_weight,
+          start: validWeights[0].body_weight,
+          end: validWeights[validWeights.length - 1].body_weight,
           change:
             Math.round(
-              (weights[weights.length - 1].body_weight! - weights[0].body_weight!) * 10
+              (validWeights[validWeights.length - 1].body_weight - validWeights[0].body_weight) * 10
             ) / 10,
         }
       : null;

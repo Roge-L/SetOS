@@ -10,6 +10,6 @@ export async function recalculateDailyTotals(
     p_date: date,
   });
   if (error) {
-    console.error("Failed to recalculate daily totals:", error.message);
+    throw new Error(`Failed to recalculate daily totals for ${date}: ${error.message}`);
   }
 }

@@ -20,6 +20,9 @@ export async function downloadTelegramFile(
   const fileRes = await fetch(
     `https://api.telegram.org/file/bot${BOT_TOKEN()}/${data.result.file_path}`
   );
+  if (!fileRes.ok) {
+    throw new Error(`Failed to download Telegram file: HTTP ${fileRes.status}`);
+  }
   return fileRes.arrayBuffer();
 }
 

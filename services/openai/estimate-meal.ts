@@ -1,4 +1,5 @@
 import { getOpenAI, models } from "@/lib/openai";
+import { zodResponseFormat } from "openai/helpers/zod";
 import {
   MEAL_ESTIMATION_SYSTEM,
   buildMealEstimationPrompt,
@@ -35,7 +36,7 @@ export async function estimateMeal(opts: {
       { role: "system", content: MEAL_ESTIMATION_SYSTEM },
       { role: "user", content },
     ],
-    response_format: { type: "json_object" },
+    response_format: zodResponseFormat(MealEstimationSchema, "meal_estimation"),
     temperature: 0.3,
     max_tokens: 500,
   });
@@ -43,8 +44,7 @@ export async function estimateMeal(opts: {
   const raw = response.choices[0]?.message?.content;
   if (!raw) throw new Error("Empty response from OpenAI meal estimation");
 
-  const parsed = JSON.parse(raw);
-  return MealEstimationSchema.parse(parsed);
+  return MealEstimationSchema.parse(JSON.parse(raw));
 }
 
 // Web-search-backed estimation using the Responses API.

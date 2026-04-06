@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
+import { recalculateTotalsAction } from "@/app/actions/recalculate-totals";
 
 interface MealLog {
   id: string;
@@ -77,6 +78,12 @@ export function MealForm({ meal }: { meal: MealLog }) {
       return;
     }
 
+    // Recalculate daily totals for affected dates
+    const datesToRecalc = [mealDate];
+    if (mealDate !== originalDate) datesToRecalc.push(originalDate);
+    await recalculateTotalsAction(datesToRecalc);
+
+    setSaving(false);
     router.push("/dashboard");
     router.refresh();
   }
@@ -85,6 +92,7 @@ export function MealForm({ meal }: { meal: MealLog }) {
     if (!confirm("Delete this meal?")) return;
     const supabase = createClient();
     await supabase.from("meal_logs").delete().eq("id", meal.id);
+    await recalculateTotalsAction([originalDate]);
     router.push("/dashboard");
     router.refresh();
   }

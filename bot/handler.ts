@@ -31,17 +31,41 @@ async function getUserId(telegramChatId: number): Promise<string | null> {
   return data?.user_id || null;
 }
 
+const TELEGRAM_MAX_LENGTH = 4096;
+
 async function sendMessage(chatId: number, text: string) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      parse_mode: "Markdown",
-    }),
-  });
+
+  // Split long messages at the Telegram limit
+  const chunks =
+    text.length <= TELEGRAM_MAX_LENGTH
+      ? [text]
+      : text.match(new RegExp(`.{1,${TELEGRAM_MAX_LENGTH}}`, "gs")) || [text];
+
+  for (const chunk of chunks) {
+    // Try with Markdown first, fall back to plain text if it fails
+    const res = await fetch(
+      `https://api.telegram.org/bot${token}/sendMessage`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: chunk,
+          parse_mode: "Markdown",
+        }),
+      }
+    );
+    const data = await res.json();
+    if (!data.ok) {
+      // Markdown parse failure (e.g. unmatched * or _) — retry without parse_mode
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text: chunk }),
+      });
+    }
+  }
 }
 
 export async function handleTelegramUpdate(update: TelegramUpdate) {

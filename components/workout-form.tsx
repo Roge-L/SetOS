@@ -89,10 +89,18 @@ export function WorkoutForm({ workout }: { workout: Workout }) {
   async function handleDeleteSet(setId: string, exIdx: number) {
     const supabase = createClient();
     await supabase.from("workout_sets").delete().eq("id", setId);
+
     setExercises((prev) => {
       const next = [...prev];
       const ex = { ...next[exIdx] };
       ex.workout_sets = ex.workout_sets.filter((s) => s.id !== setId);
+
+      // Clean up orphaned exercise if no sets remain
+      if (ex.workout_sets.length === 0) {
+        supabase.from("workout_exercises").delete().eq("id", ex.id);
+        return next.filter((_, i) => i !== exIdx);
+      }
+
       next[exIdx] = ex;
       return next;
     });

@@ -167,6 +167,15 @@ async function executeTool(
 ): Promise<string> {
   const supabase = createAdminClient();
 
+  // Validate date fields — reject malformed dates before they hit the DB
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (args.date && !dateRegex.test(args.date)) {
+    return `Invalid date format "${args.date}". Use YYYY-MM-DD.`;
+  }
+  if (args.target_date && !dateRegex.test(args.target_date)) {
+    return `Invalid date format "${args.target_date}". Use YYYY-MM-DD.`;
+  }
+
   switch (name) {
     case "log_food": {
       const result = await logFood({
@@ -404,7 +413,12 @@ async function buildContext(userId: string): Promise<string> {
     ctx += "\nToday's exercises:\n";
     for (const ex of todayExs) {
       const sets = ex.workout_sets
-        .map((s: any) => s.weight ? `${s.weight}x${s.reps}` : `${s.reps} reps`)
+        .map((s: any) => {
+          if (s.duration_seconds) return `${Math.round(s.duration_seconds / 60)} min`;
+          if (s.weight && s.reps) return `${s.weight}x${s.reps}`;
+          if (s.reps) return `${s.reps} reps`;
+          return "—";
+        })
         .join(", ");
       ctx += `- ${ex.normalized_exercise_name}: ${sets}\n`;
     }

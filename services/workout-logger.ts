@@ -16,28 +16,36 @@ interface LogStructuredInput {
   notes: string | null;
 }
 
-// Get or create a workout session for a given date (defaults to today)
+// Get or create a workout session for a given date (defaults to today).
+// Uses upsert with unique constraint on (user_id, date) to prevent duplicates
+// from concurrent requests.
 export async function getSessionForDate(userId: string, date?: string) {
   const supabase = createAdminClient();
   const targetDate = date || todayDate();
 
-  const { data: existing } = await supabase
-    .from("workout_sessions")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("date", targetDate)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .single();
-
-  if (existing) return existing;
-
   const { data, error } = await supabase
     .from("workout_sessions")
-    .insert({ user_id: userId, date: targetDate })
+    .upsert(
+      { user_id: userId, date: targetDate },
+      { onConflict: "user_id,date", ignoreDuplicates: true }
+    )
     .select()
     .single();
-  if (error) throw new Error(`Failed to create workout session: ${error.message}`);
+
+  // upsert with ignoreDuplicates may return nothing if row already exists,
+  // so fall back to a select
+  if (error || !data) {
+    const { data: existing } = await supabase
+      .from("workout_sessions")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("date", targetDate)
+      .limit(1)
+      .single();
+    if (existing) return existing;
+    throw new Error(`Failed to get/create workout session: ${error?.message}`);
+  }
+
   return data;
 }
 

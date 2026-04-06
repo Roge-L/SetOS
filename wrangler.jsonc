@@ -8,6 +8,14 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  // Self-reference binding for middleware rewrites and ISR revalidation.
+  // Ref: https://opennext.js.org/cloudflare
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "setos"
+    }
+  ],
   // Environment variables are set via `wrangler secret` or the Cloudflare dashboard.
   // Do NOT put secrets in this file.
   "vars": {}
