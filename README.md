@@ -23,12 +23,13 @@ Log food via text, voice, or photos. Log workouts conversationally through Teleg
 app/            → Next.js pages and API routes (App Router)
 components/     → React UI components (client + server)
 lib/            → Supabase clients, OpenAI client, shared utilities
+app/actions/    → Server actions (daily totals recalculation)
 services/       → Core business logic
-  ├── openai/   → AI service layer (transcribe, estimate, parse)
+  ├── openai/   → AI service layer (transcribe, estimate with structured outputs)
   ├── fatsecret.ts        → FatSecret API client (restaurant + branded foods)
   ├── openfoodfacts.ts    → Open Food Facts client (packaged products)
   ├── food-logger.ts      → Food logging orchestrator (multi-source pipeline)
-  ├── workout-logger.ts   → Workout session/set management
+  ├── workout-logger.ts   → Workout session/set management (upsert, structured)
   └── daily-totals.ts     → Nutrition totals recalculation
 bot/            → Telegram bot: LLM agent (agent.ts) + webhook handler
   ├── agent.ts  → Smart router: OpenAI function-calling agent with 6 tools
@@ -68,8 +69,13 @@ Every text and voice message goes through an [OpenAI function-calling agent](htt
 
 The agent uses a manual loop pattern ([ref](https://developers.openai.com/cookbook/examples/orchestrating_agents)) with:
 - **`tool_choice: "auto"`** — model decides when to use tools vs reply conversationally
-- **`parallel_tool_calls: false`** — avoids ordering bugs ([ref](https://developers.openai.com/cookbook/examples/o-series/o3o4-mini_prompting_guide))
+- **`parallel_tool_calls: true`** — multiple exercises or corrections fire simultaneously
 - **`strict: true`** on all tools via [`zodFunction()`](https://github.com/openai/openai-node/blob/master/helpers.md) — guaranteed valid arguments ([ref](https://platform.openai.com/docs/guides/structured-outputs))
+- **Agentic system prompt** — persistence + tool-calling reminders from [GPT-4.1 prompting guide](https://developers.openai.com/cookbook/examples/gpt4-1_prompting_guide)
+- **Date-aware logging** — resolves "last night", "on tuesday", "april 3rd" to YYYY-MM-DD with format validation
+- **Previous performance context** — agent sees recent exercise history and flags PRs
+- **Daily totals in responses** — food log responses include running daily macro totals
+- **Structured meal outputs** — uses [`zodResponseFormat()`](https://github.com/openai/openai-node/blob/master/helpers.md) for schema-enforced nutrition estimation
 - **Max 5 iterations** — safety valve against infinite loops
 - **gpt-4.1-mini** — fast, cheap (~$0.001/interaction), strong function calling
 
@@ -96,7 +102,7 @@ The agent can call **multiple tools in one turn** — e.g., "the workout was yes
 
 **Food estimation pipeline:** (see table above) FatSecret → Open Food Facts → OpenAI web search → OpenAI fallback
 
-**Workout logging:** Agent extracts structured data (exercise name, sets, reps, weight) directly from the user's message → writes to DB. One tool call per exercise — no parser layer.
+**Workout logging:** Agent extracts structured data (exercise name, sets, reps, weight) directly → writes to DB. One tool call per exercise. Sessions auto-created per date with unique constraint (no duplicates). Sessions auto-titled from exercise names (e.g. "Bench Press, Squat, OHP").
 
 **Dashboard:** Server components fetch today's totals, meals, workouts, and body weight from Supabase (RLS enforced per user).
 
@@ -143,13 +149,15 @@ Fill in every value. See `.env.example` for the full list.
 
 ### 4. Database
 
-Open the **Supabase SQL Editor** and run the full contents of:
+Open the **Supabase SQL Editor** and run each migration in order:
 
 ```
-db/migrations/001_initial_schema.sql
+db/migrations/001_initial_schema.sql    — tables, indexes, RLS, triggers, functions
+db/migrations/002_timezone_aware_daily_totals.sql  — timezone-aware recalculation
+db/migrations/003_simplify_workout_dates.sql       — replace timestamps with date field
+db/migrations/004_drop_workout_active.sql          — remove active column
+db/migrations/005_unique_workout_session_per_date.sql — prevent duplicate sessions
 ```
-
-This creates all tables, indexes, RLS policies, the auto-user-creation trigger, and the daily totals recalculation function.
 
 ### 5. Supabase Storage
 
@@ -346,20 +354,27 @@ The bot is conversational — just talk to it naturally. No commands required (t
 - Send a voice note describing what you ate
 
 **Workout logging:**
-- `bench 185x8`
-- `incline db 60s 10 10 8`
+- `bench 5x5 at 225` — structured extraction: exercise, sets, reps, weight
+- `incline db 60s 10 10 8` — "60s" = 60lb dumbbells
 - `lat pulldown 4x10 @ 140`
-- `ran 25 min easy`
+- `ran 25 min easy` — cardio with duration
+- `squatted 2 plates 5 5 3 yesterday` — logs to yesterday with plate math (225lb)
 
-**Corrections (natural language):**
+**Date-aware logging:**
+- `had pizza last night` — logs food directly to yesterday
+- `on tuesday I did bench 5x5 225` — resolves to the correct date
+- `I had eggs and also did a leg workout yesterday` — both tools get yesterday's date
+
+**Corrections:**
 - `the eggs were actually yesterday`
 - `move the workout to last night`
 - `delete the string cheese`
 - `the basketball workout and the ramen were both yesterday, fix them`
 
-**Other:**
-- `what did I eat today?` — agent responds conversationally
-- `thanks` — agent replies without calling any tool
+**Queries:**
+- `what did I eat today?` — agent sees daily totals and responds accurately
+- `how much protein have I had?` — answers from real data in context
+- `what did I bench last time?` — previous performance is in context
 - `/start` — setup instructions + chat ID
 
 ---
