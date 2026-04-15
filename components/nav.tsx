@@ -18,6 +18,7 @@ export function Nav() {
   const links = [
     { href: "/dashboard", label: "Today" },
     { href: "/dashboard/weekly", label: "Week" },
+    { href: "/dashboard/search", label: "Search" },
   ];
 
   return (

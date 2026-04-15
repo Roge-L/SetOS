@@ -20,16 +20,10 @@ import {
   logStructuredExercise,
 } from "@/services/workout-logger";
 import { recalculateDailyTotals } from "@/services/daily-totals";
-import { todayDate, dateInTimezone, getUTCRangeForLocalDate, formatSets } from "@/lib/utils";
+import { todayDate, dateInTimezone, getUTCRangeForLocalDate, formatSets, escapeLike } from "@/lib/utils";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
 const MAX_ITERATIONS = 5;
-
-// Escape LIKE/ILIKE metacharacters to prevent pattern injection
-// Ref: https://www.postgresql.org/docs/current/functions-matching.html#FUNCTIONS-LIKE
-function escapeLike(input: string): string {
-  return input.replace(/[%_\\]/g, "\\$&");
-}
 
 // --- Tool schemas (strict: true is set automatically by zodFunction) ---
 

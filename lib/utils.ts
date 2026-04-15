@@ -89,6 +89,12 @@ export function formatDateLong(date: string): string {
   });
 }
 
+// Escape LIKE/ILIKE metacharacters to prevent pattern injection.
+// Ref: https://www.postgresql.org/docs/current/functions-matching.html#FUNCTIONS-LIKE
+export function escapeLike(input: string): string {
+  return input.replace(/[%_\\]/g, "\\$&");
+}
+
 // Format workout sets in standard gym notation:
 // - All same weight & reps: "4x10 @ 35 lb"
 // - Same weight, diff reps: "35 lb x 10, 10, 8, 6"
