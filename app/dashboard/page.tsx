@@ -4,6 +4,7 @@ import { DailySummary } from "@/components/daily-summary";
 import { MealList } from "@/components/meal-list";
 import { WorkoutList } from "@/components/workout-list";
 import { BodyWeightEntry } from "@/components/body-weight-entry";
+import { DateJumper } from "@/components/date-jumper";
 import { todayDate, getUTCRangeForLocalDate, formatDateLong, formatDate, TIMEZONE } from "@/lib/utils";
 import Link from "next/link";
 
@@ -99,10 +100,11 @@ export default async function DashboardPage() {
         <WorkoutList workouts={workouts as any} />
       </section>
 
-      {/* Recent days */}
+      {/* Recent days + date jumper */}
       <section>
-        <h2 className="text-sm font-medium mb-2">Recent days</h2>
-        <div className="flex gap-2 flex-wrap">
+        <h2 className="text-sm font-medium mb-2">Jump to day</h2>
+        <div className="flex gap-2 flex-wrap items-center">
+          <DateJumper today={today} />
           {recentDays.slice(1).map((d) => (
             <Link
               key={d}
