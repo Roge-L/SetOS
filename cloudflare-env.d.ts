@@ -1,3 +1,0 @@
-interface CloudflareEnv {
-  ASSETS: Fetcher;
-}

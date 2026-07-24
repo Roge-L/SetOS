@@ -1,0 +1,17 @@
+# Local secrets for `wrangler dev`. Copy to `.dev.vars` and fill in.
+# In production these are set with `npx wrangler secret put <NAME>` instead.
+
+# The Authorization: Bearer value your Claude client must send. Make it long + random,
+# e.g.  openssl rand -hex 32
+MCP_BEARER_TOKEN=
+
+# Supabase
+SUPABASE_URL=https://mfxypgltmsyfkawnokpc.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=
+
+# The public.users uuid your rows belong to (SetOS is single-user)
+SETOS_USER_ID=
+
+# FatSecret (optional — only `lookup_food` uses it). https://platform.fatsecret.com
+FATSECRET_ID=
+FATSECRET_SECRET=

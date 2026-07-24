@@ -1,21 +1,25 @@
 {
+  // =============================================================================
+  // SetOS MCP server — a single Cloudflare Worker that speaks the Model Context
+  // Protocol over Streamable HTTP. Claude (Code / web / mobile) connects to
+  // https://<worker>/mcp and calls tools to log food, workouts, and body weight
+  // and to read back daily / weekly summaries.
+  //
+  // Stateless: it uses `createMcpHandler` (agents SDK), so NO Durable Objects and
+  // NO paid plan are required. Every request builds a fresh McpServer.
+  //
+  // Deploy:  npm run deploy
+  // Secrets: npx wrangler secret put <NAME>   (see the list under "vars" below)
+  // =============================================================================
+
   "$schema": "node_modules/wrangler/config-schema.json",
-  "main": ".open-next/worker.js",
   "name": "setos",
-  "compatibility_date": "2025-03-01",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+  // supabase-js needs a few Node built-ins (events, stream) that this flag shims.
   "compatibility_flags": ["nodejs_compat"],
-  "assets": {
-    "directory": ".open-next/assets",
-    "binding": "ASSETS"
-  },
-  // Self-reference binding for middleware rewrites and ISR revalidation.
-  // Ref: https://opennext.js.org/cloudflare
-  "services": [
-    {
-      "binding": "WORKER_SELF_REFERENCE",
-      "service": "setos"
-    }
-  ],
+  "minify": true,
+
   "observability": {
     "enabled": true,
     "logs": {
@@ -24,7 +28,20 @@
       "invocation_logs": true
     }
   },
-  // Environment variables are set via `wrangler secret` or the Cloudflare dashboard.
-  // Do NOT put secrets in this file.
-  "vars": {}
+
+  // Non-secret config. Secrets are set with `wrangler secret put` and are NOT
+  // listed here — putting them in this file would commit them to git.
+  //
+  //   Required secrets:
+  //     MCP_BEARER_TOKEN          long random string; the Authorization: Bearer value
+  //     SUPABASE_URL              https://<ref>.supabase.co
+  //     SUPABASE_SERVICE_ROLE_KEY service-role key (server-side, bypasses RLS)
+  //     SETOS_USER_ID             the public.users uuid these rows belong to (you)
+  //     FATSECRET_ID              FatSecret OAuth client id   (optional; lookup_food)
+  //     FATSECRET_SECRET          FatSecret OAuth client secret (optional; lookup_food)
+  "vars": {
+    // IANA timezone used for "today" and day boundaries. Must match the timezone
+    // baked into the recalculate_daily_totals() SQL function (America/New_York).
+    "SETOS_TIMEZONE": "America/New_York"
+  }
 }
