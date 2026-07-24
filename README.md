@@ -25,22 +25,35 @@ setos worker  ── /mcp ──▶  MCP tools ──▶ services ──▶ Supa
 
 ## Tools
 
+Full CRUD on every entity — meals, sessions, exercises, **individual sets**, weight.
+
 | Group | Tools |
 |---|---|
-| Grounding | `about` (what SetOS is, today's date, conventions) |
-| Food | `log_food`, `lookup_food`, `list_meals`, `edit_meal`, `move_meal`, `delete_meal` |
-| Workouts | `log_workout`, `list_workouts`, `move_workout`, `delete_workout` |
-| Body | `log_weight` |
-| Summaries | `get_day`, `get_week` |
+| Grounding | `setos_about` |
+| Meals | `setos_log_meals` (batch), `setos_search_meals` (filters + pagination), `setos_update_meal` (any field, incl. moving days), `setos_delete_meals` |
+| Food data | `setos_lookup_food` (FatSecret + Open Food Facts) |
+| Workouts | `setos_log_workout` (whole session in one call), `setos_get_workouts`, `setos_update_workout`, `setos_update_exercise`, `setos_update_set`, `setos_delete_workout_items` (session\|exercise\|sets) |
+| Analysis | `setos_exercise_history` (progression, volume, estimated 1RM, PRs) |
+| Body | `setos_log_weight`, `setos_delete_weight` |
+| Summaries | `setos_get_day`, `setos_get_summary` (any range ≤ 92 days) |
 
-Reads are marked `readOnlyHint`; deletes are marked `destructiveHint` and, when matched by a name/hint that's ambiguous, return the candidates instead of guessing.
+### Why 18 tools and not 40
+
+Design follows published MCP guidance rather than mirroring the database:
+
+- **Depth through parameters, not tool count.** One `setos_update_meal` patches any field — including the date, which is how a meal moves between days. That beats five micro-tools ([Anthropic: *Writing effective tools for agents*](https://www.anthropic.com/engineering/writing-tools-for-agents) — don't wrap endpoints 1:1).
+- **Bundle what co-occurs.** A whole workout is one `setos_log_workout` call; a described plate of food is one `setos_log_meals` call ([AWS Prescriptive Guidance](https://docs.aws.amazon.com/prescriptive-guidance/latest/mcp-strategies/mcp-tool-strategy-scope.html) — bundle 3+ chained calls, keep ≤8 params).
+- **Action-shaped reads.** `setos_get_day` and `setos_exercise_history` answer a question in one call instead of making the model aggregate several.
+- **Stay under the selection cliff.** Tool-selection accuracy degrades past ~40–50 tools; 18 keeps headroom alongside your other MCP servers.
+
+Reads carry `readOnlyHint`, deletes `destructiveHint`. Deletes require explicit ids (never a fuzzy name), so a single call can't remove the wrong record.
 
 ## Setup
 
 ### 1. Secrets
 
 ```bash
-npx wrangler secret put MCP_BEARER_TOKEN          # openssl rand -hex 32
+npx wrangler secret put SETOS_CONSENT_PASSPHRASE  # openssl rand -hex 24
 npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 npx wrangler secret put FATSECRET_ID              # optional (lookup_food)
 npx wrangler secret put FATSECRET_SECRET          # optional (lookup_food)
@@ -67,14 +80,22 @@ Your MCP endpoint is `https://<worker>.<subdomain>.workers.dev/mcp` (or attach a
 
 ## Connecting Claude
 
-**Claude Code** (works today):
+The worker is a full **OAuth 2.1** authorization server (PKCE S256, Dynamic Client Registration, RFC 9728 metadata) — which is what claude.ai web / macOS / iOS connectors require. Since SetOS has one user, "consent" is a single passphrase instead of a login system.
+
+**claude.ai web, macOS desktop, iPhone** — add it once and it appears on all three:
+
+1. claude.ai → **Settings → Connectors → Add custom connector**
+2. URL: `https://<worker>.workers.dev/mcp` (leave the OAuth fields blank)
+3. Click **Connect** → the SetOS consent page opens → enter your `SETOS_CONSENT_PASSPHRASE` → **Approve**
+
+**Claude Code** uses the same OAuth flow:
 
 ```bash
-claude mcp add --transport http setos https://<worker>.workers.dev/mcp \
-  --header "Authorization: Bearer <MCP_BEARER_TOKEN>"
+claude mcp add --transport http setos https://<worker>.workers.dev/mcp -s user
+claude mcp login setos
 ```
 
-**claude.ai web / mobile** — add a custom connector with the `/mcp` URL. A static bearer token is entered under **Request headers** (`Authorization` = `Bearer <token>`). Note this **request-header auth is an Anthropic beta** (`static_headers`) that's rolled out gradually; if it isn't available on your account yet, the connector UI only offers OAuth. Auth is isolated in [`src/auth.ts`](src/auth.ts) so a minimal OAuth wrapper can drop in later without touching any tool or service.
+**Security posture:** Dynamic Client Registration is open by spec, so registration *and* authorization both check a redirect-URI allowlist ([`src/oauth/redirects.ts`](src/oauth/redirects.ts)) limited to Anthropic's hosted callbacks plus RFC 8252 loopback — this closes the consent-phishing (confused deputy) hole. The consent request is HMAC-sealed between the form and the grant so it can't be tampered with. Tokens are hashed at rest by the provider; grant props are empty (Supabase credentials live in the worker's own env, never in a grant).
 
 ## Local development
 
@@ -96,14 +117,16 @@ npx wrangler deploy --dry-run
 
 ```
 src/
-  index.ts        # fetch handler: bearer gate → createMcpHandler
-  auth.ts         # static bearer check (the only auth code; swap for OAuth here)
+  index.ts        # OAuthProvider wiring: /mcp (token-gated) + DCR allowlist
   server.ts       # builds the McpServer + registers tools, with server instructions
   env.ts          # bindings/secrets contract
+  oauth/
+    handler.ts    # consent page: /authorize GET form + POST grant, landing, /health
+    redirects.ts  # redirect-URI allowlist (threat model inside)
   db/             # supabase client + row types
   lib/            # dates (timezone/DST), format (rounding + untrusted wrapping), result helpers
   services/       # food, nutrition (FatSecret/OFF), workout, body, totals, summary
   tools/          # MCP tool definitions (zod I/O) grouped by domain
-tests/            # vitest unit suites
+tests/            # vitest unit suites (dates/DST, macros, nutrition, redirect allowlist)
 db/migrations/    # existing Postgres schema
 ```

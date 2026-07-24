@@ -18,6 +18,11 @@ export function roundG(n: number): number {
   return Number.isFinite(n) ? Math.round(n * 10) / 10 : 0;
 }
 
+/** Escape LIKE wildcards so a search for "50%" isn't treated as a wildcard. */
+export function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, "\\$&");
+}
+
 /** Drop C0 control chars + DEL (keep tab/newline/CR) without any control-char literals in source. */
 function stripControl(text: string): string {
   let out = "";

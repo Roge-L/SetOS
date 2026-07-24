@@ -4,10 +4,16 @@
  * for what the worker expects at runtime.
  */
 export interface Env {
-  /** The `Authorization: Bearer <value>` your Claude client must send. */
-  MCP_BEARER_TOKEN: string;
+  /** OAuth client/grant/token storage for @cloudflare/workers-oauth-provider. */
+  OAUTH_KV: KVNamespace;
 
-  /** Supabase project URL, e.g. https://<ref>.supabase.co */
+  /**
+   * The single passphrase that approves a connection on the consent screen.
+   * SetOS has one user, so this stands in for a login system.
+   */
+  SETOS_CONSENT_PASSPHRASE: string;
+
+  /** Supabase project URL, e.g. https://<ref>.supabase.co (non-secret, a var). */
   SUPABASE_URL: string;
   /** Service-role key — server-side only, bypasses RLS. Never ships to a client. */
   SUPABASE_SERVICE_ROLE_KEY: string;
@@ -22,7 +28,7 @@ export interface Env {
    */
   SETOS_TIMEZONE: string;
 
-  /** FatSecret OAuth credentials — optional; only `lookup_food` needs them. */
+  /** FatSecret OAuth credentials — optional; only `setos_lookup_food` needs them. */
   FATSECRET_ID?: string;
   FATSECRET_SECRET?: string;
 }

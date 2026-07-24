@@ -25,6 +25,17 @@
   "compatibility_flags": ["nodejs_compat"],
   "minify": true,
 
+  // OAuth client/grant/token storage for @cloudflare/workers-oauth-provider.
+  // Tokens are stored hashed; grant props are encrypted with material derived
+  // from the issued token, so KV contents alone can't yield a credential.
+  // Namespace "setos-oauth", provisioned 2026-07-24.
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "7302bf5cdbbd4e0c9f1a72d04f5590ab"
+    }
+  ],
+
   "observability": {
     "enabled": true,
     "logs": {
@@ -38,7 +49,7 @@
   // listed here — putting them in this file would commit them to git.
   //
   //   Required secrets (true secrets only — set with `wrangler secret put`):
-  //     MCP_BEARER_TOKEN          long random string; the Authorization: Bearer value
+  //     SETOS_CONSENT_PASSPHRASE  approves a connection on the OAuth consent screen
   //     SUPABASE_SERVICE_ROLE_KEY service-role key (server-side, bypasses RLS)
   //     FATSECRET_ID              FatSecret OAuth client id   (optional; lookup_food)
   //     FATSECRET_SECRET          FatSecret OAuth client secret (optional; lookup_food)

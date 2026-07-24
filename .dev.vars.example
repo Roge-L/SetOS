@@ -4,13 +4,13 @@
 # Non-secret config (SUPABASE_URL, SETOS_USER_ID, SETOS_TIMEZONE) lives in
 # wrangler.jsonc `vars`, so it is NOT needed here.
 
-# The Authorization: Bearer value your Claude client must send. Make it long + random,
-# e.g.  openssl rand -hex 32
-MCP_BEARER_TOKEN=
+# Approves a connection on the OAuth consent screen. Long + random:
+#   openssl rand -hex 24
+SETOS_CONSENT_PASSPHRASE=
 
 # Supabase service-role key (server-side, bypasses RLS)
 SUPABASE_SERVICE_ROLE_KEY=
 
-# FatSecret (optional — only `lookup_food` uses it). https://platform.fatsecret.com
+# FatSecret (optional — only setos_lookup_food uses it). https://platform.fatsecret.com
 FATSECRET_ID=
 FATSECRET_SECRET=

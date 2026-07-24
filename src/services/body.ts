@@ -45,6 +45,20 @@ export async function getWeightForDate(db: Db, userId: string, date: string): Pr
   return data ?? null;
 }
 
+/** Remove the weight entry for a day. */
+export async function deleteWeight(db: Db, userId: string, tz: string, date?: string) {
+  const day = date ? assertDate(date) : todayDate(tz);
+  const { data, error } = await db
+    .from("body_metrics")
+    .delete()
+    .eq("user_id", userId)
+    .eq("date", day)
+    .select("date");
+  if (error) throw new Error(`Failed to delete weight: ${error.message}`);
+  if (!data?.length) throw new Error(`No weight entry logged for ${day}.`);
+  return { deleted: true, date: day };
+}
+
 /** Weight entries in [start, end] (inclusive), oldest first. */
 export async function getWeightRange(db: Db, userId: string, start: string, end: string): Promise<BodyMetricRow[]> {
   const { data, error } = await db

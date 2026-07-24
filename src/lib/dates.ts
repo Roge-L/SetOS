@@ -98,6 +98,12 @@ export function dateInTimezone(instant: Date, tz: string): string {
   return wallParts(instant, tz).date;
 }
 
+/** Local wall-clock time as "HH:MM" for an instant, in `tz`. */
+export function timeOfDayInTimezone(instant: Date, tz: string): string {
+  const p = wallParts(instant, tz);
+  return `${p.hour}:${p.minute}`;
+}
+
 /** Today's local date (YYYY-MM-DD) in `tz`. */
 export function todayDate(tz: string): string {
   return dateInTimezone(new Date(), tz);
