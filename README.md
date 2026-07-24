@@ -41,14 +41,12 @@ Reads are marked `readOnlyHint`; deletes are marked `destructiveHint` and, when 
 
 ```bash
 npx wrangler secret put MCP_BEARER_TOKEN          # openssl rand -hex 32
-npx wrangler secret put SUPABASE_URL              # https://<ref>.supabase.co
 npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
-npx wrangler secret put SETOS_USER_ID             # your public.users uuid
 npx wrangler secret put FATSECRET_ID              # optional (lookup_food)
 npx wrangler secret put FATSECRET_SECRET          # optional (lookup_food)
 ```
 
-`SETOS_TIMEZONE` is a plain var in `wrangler.jsonc` (default `America/New_York`). It **must** match the timezone baked into the `recalculate_daily_totals()` SQL function, or day boundaries will disagree.
+`SUPABASE_URL`, `SETOS_USER_ID`, and `SETOS_TIMEZONE` are non-secret `vars` in `wrangler.jsonc` (already filled in). `SETOS_TIMEZONE` (`America/New_York`) **must** match the timezone baked into the `recalculate_daily_totals()` SQL function, or day boundaries will disagree.
 
 ### 2. Database
 

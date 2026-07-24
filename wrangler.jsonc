@@ -32,16 +32,20 @@
   // Non-secret config. Secrets are set with `wrangler secret put` and are NOT
   // listed here — putting them in this file would commit them to git.
   //
-  //   Required secrets:
+  //   Required secrets (true secrets only — set with `wrangler secret put`):
   //     MCP_BEARER_TOKEN          long random string; the Authorization: Bearer value
-  //     SUPABASE_URL              https://<ref>.supabase.co
   //     SUPABASE_SERVICE_ROLE_KEY service-role key (server-side, bypasses RLS)
-  //     SETOS_USER_ID             the public.users uuid these rows belong to (you)
   //     FATSECRET_ID              FatSecret OAuth client id   (optional; lookup_food)
   //     FATSECRET_SECRET          FatSecret OAuth client secret (optional; lookup_food)
+  //
+  // SUPABASE_URL and SETOS_USER_ID live in `vars` below — the URL is public and the
+  // user id is inert without the service-role key, so neither is a real secret.
   "vars": {
     // IANA timezone used for "today" and day boundaries. Must match the timezone
     // baked into the recalculate_daily_totals() SQL function (America/New_York).
-    "SETOS_TIMEZONE": "America/New_York"
+    "SETOS_TIMEZONE": "America/New_York",
+    // Supabase project (public URL) + the single owner these rows belong to.
+    "SUPABASE_URL": "https://mfxypgltmsyfkawnokpc.supabase.co",
+    "SETOS_USER_ID": "7213a04f-1162-4d14-9257-894563b2b6aa"
   }
 }
