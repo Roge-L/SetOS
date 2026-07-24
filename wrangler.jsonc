@@ -13,6 +13,9 @@
   // =============================================================================
 
   "$schema": "node_modules/wrangler/config-schema.json",
+  // Pinned so deploys are deterministic — these credentials can see several
+  // accounts, and SetOS is personal, so it must not land in the Trakyo org.
+  "account_id": "4748f9bc0885cb3608a2c0344da7a220",
   "name": "setos",
   "main": "src/index.ts",
   "compatibility_date": "2026-07-01",
