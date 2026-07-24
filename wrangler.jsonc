@@ -14,8 +14,10 @@
 
   "$schema": "node_modules/wrangler/config-schema.json",
   // Pinned so deploys are deterministic — these credentials can see several
-  // accounts, and SetOS is personal, so it must not land in the Trakyo org.
-  "account_id": "4748f9bc0885cb3608a2c0344da7a220",
+  // accounts. This is the account that already owns the `setos` worker (and the
+  // one CLOUDFLARE_API_TOKEN in .env is scoped to), so v2 replaces v1 in place
+  // rather than landing in the Trakyo org or a personal account.
+  "account_id": "2080ef4665d775c069b861da74ca681e",
   "name": "setos",
   "main": "src/index.ts",
   "compatibility_date": "2026-07-01",
