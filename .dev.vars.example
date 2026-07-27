@@ -11,10 +11,17 @@
 SETOS_STATE_SECRET=
 
 # --- Supabase ---------------------------------------------------------------
-# Dashboard -> Project Settings -> API -> JWT keys -> "JWT secret" (legacy).
+# EC P-256 private key as a single-line JWK, e.g.
+#   {"kty":"EC","kid":"<uuid>","d":"...","crv":"P-256","x":"...","y":"..."}
 # Signs the short-lived per-user token that makes auth.uid() resolve, which is
 # what arms the RLS policies. Without it every request fails closed.
-SUPABASE_JWT_SECRET=
+#
+# Generate with `supabase gen signing-key --algorithm ES256`, then import it at
+# Dashboard -> Settings -> JWT Keys as a STANDBY key. Do NOT rotate to it: that
+# would make this key sign every user session in the project, when all we need
+# is for Supabase to verify tokens we mint. Standby keys are published in the
+# JWKS, which is enough for verification.
+SUPABASE_SIGNING_KEY=
 
 # Service-role key. Bypasses RLS; used ONLY to look up the invitation row right
 # after a password checks out. Never reaches a tool handler.

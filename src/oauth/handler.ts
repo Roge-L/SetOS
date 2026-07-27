@@ -93,7 +93,19 @@ SetOS account.</p>`
       }
 
       if (request.method === "GET") {
-        const authReq = await env.OAUTH_PROVIDER.parseAuthRequest(request);
+        // parseAuthRequest throws on an unknown client_id or a malformed request
+        // — which happens for real (a client re-registers, or grant storage was
+        // cleared), and an uncaught throw here is an opaque 500 for the user.
+        let authReq: Awaited<ReturnType<typeof env.OAUTH_PROVIDER.parseAuthRequest>>;
+        try {
+          authReq = await env.OAUTH_PROVIDER.parseAuthRequest(request);
+        } catch {
+          return html(
+            `<h1>Invalid request</h1><p>This connection request isn't valid — usually the client is
+unknown to this server. Remove the SetOS connector in Claude and add it again.</p>`,
+            400
+          );
+        }
         if (!isAllowedRedirectUri(authReq.redirectUri)) {
           return html("<h1>Blocked</h1><p>That redirect URI is not allowed for this server.</p>", 403);
         }

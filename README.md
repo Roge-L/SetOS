@@ -56,13 +56,27 @@ Reads carry `readOnlyHint`, deletes `destructiveHint`. Deletes require explicit 
 
 ```bash
 npx wrangler secret put SETOS_STATE_SECRET        # openssl rand -hex 32
-npx wrangler secret put SUPABASE_JWT_SECRET       # Settings → API → JWT keys
+npx wrangler secret put SUPABASE_SIGNING_KEY      # EC P-256 private JWK, see below
 npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 npx wrangler secret put FATSECRET_ID              # optional (lookup_food)
 npx wrangler secret put FATSECRET_SECRET          # optional (lookup_food)
 ```
 
-`SUPABASE_URL` and `SUPABASE_ANON_KEY` are non-secret `vars` in `wrangler.jsonc` (already filled in). The anon key grants nothing on its own — on the request path it is paired with a per-request user JWT that RLS evaluates.
+`SUPABASE_URL` and `SUPABASE_ANON_KEY` are non-secret `vars` in `wrangler.jsonc` (already filled in). `SUPABASE_ANON_KEY` holds the modern `sb_publishable_…` key, not the legacy `anon` JWT — the legacy keys are documented as working only until the end of 2026. It grants nothing on its own; on the request path it's paired with a per-request user JWT that RLS evaluates.
+
+### 1b. Signing key
+
+The worker mints its own short-lived Postgres JWT per request, signed ES256 with a key you own:
+
+```bash
+supabase gen signing-key --algorithm ES256    # or generate a P-256 JWK yourself
+```
+
+Import it at **Settings → JWT Keys** as a **standby key**, then put the same JWK in `SUPABASE_SIGNING_KEY` (single line).
+
+**Do not click "Rotate key."** Rotating would make Supabase Auth sign *every user session in the project* with this key, putting it in a Worker secret — far more authority than we need. Standby keys are published in the JWKS discovery endpoint, which is all that's required for Postgres to *verify* the tokens we mint, while Supabase keeps signing its own sessions with its own key.
+
+This deliberately avoids the legacy JWT secret, which sits on a deprecation path and can be revoked out from under you by a routine key rotation.
 
 ### 2. Database
 
@@ -133,7 +147,7 @@ select email, display_name, timezone, is_active from public.users order by creat
 
 ## Security posture
 
-- **Tenant isolation, twice.** Every service query filters on `user_id`, and the request-path Supabase client authenticates as the caller (a short-lived HS256 JWT with `sub` = their id) so the RLS policies actually run. A future query that forgets its filter returns that user's own rows, not everyone's. The service-role key never reaches a tool handler — its only job is the invitation lookup right after a password checks out.
+- **Tenant isolation, twice.** Every service query filters on `user_id`, and the request-path Supabase client authenticates as the caller (a 120-second ES256 JWT with `sub` = their id) so the RLS policies actually run. A future query that forgets its filter returns that user's own rows, not everyone's. The service-role key never reaches a tool handler — its only job is the invitation lookup right after a password checks out.
 - **Identity, not a shared secret.** A passphrase can't say *which* holder is connecting and can't be revoked for one person. Each person now has their own credentials, and access is two independent checks: Supabase Auth must accept the password **and** an active `public.users` row must exist.
 - **Passwords are not hashed in the Worker — on purpose.** A password hash must be deliberately slow (OWASP's PBKDF2-HMAC-SHA256 floor is 600k iterations, hundreds of ms of CPU) and Workers Free allows 10ms of CPU per request. Rolling our own would have meant either exceeding that limit or picking a weak iteration count. Supabase Auth verifies bcrypt server-side, which costs the worker a network hop and ~0ms of CPU, and brings rate limiting, strength rules, and reset emails along with it.
 - **Consent phishing.** Dynamic Client Registration is open by spec, so registration *and* authorization both check a redirect-URI allowlist ([`src/oauth/redirects.ts`](src/oauth/redirects.ts)) limited to Anthropic's hosted callbacks plus RFC 8252 loopback.

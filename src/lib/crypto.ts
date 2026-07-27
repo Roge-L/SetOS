@@ -45,9 +45,53 @@ export function safeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-/** Sign a compact JWS (HS256) — what Postgres/PostgREST expects from us. */
-export async function signJwtHS256(secret: string, claims: Record<string, unknown>): Promise<string> {
+/** An EC P-256 private key in JWK form, as imported into Supabase's signing keys. */
+export interface SigningKeyJwk {
+  kty: "EC";
+  crv: "P-256";
+  kid: string;
+  d: string;
+  x: string;
+  y: string;
+}
+
+/**
+ * Importing the key costs more than the signature does, and Workers reuse an
+ * isolate across requests, so hold onto it. Keyed by `kid` so rotating the key
+ * can't serve a stale one.
+ */
+let cachedKey: { kid: string; key: CryptoKey } | null = null;
+
+async function signingKey(jwk: SigningKeyJwk): Promise<CryptoKey> {
+  if (cachedKey?.kid === jwk.kid) return cachedKey.key;
+  const key = await crypto.subtle.importKey(
+    "jwk",
+    jwk as unknown as JsonWebKey,
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign"]
+  );
+  cachedKey = { kid: jwk.kid, key };
+  return key;
+}
+
+/**
+ * Sign a compact JWS (ES256) — what Postgres/PostgREST verifies against the
+ * public half published at /auth/v1/.well-known/jwks.json.
+ *
+ * `kid` in the header is what lets Supabase pick the right public key, so it
+ * must match the key as imported in the dashboard.
+ *
+ * WebCrypto's ECDSA output is already raw r‖s (IEEE P1363), which is exactly
+ * what JWS wants — no DER unwrapping, unlike Node's default.
+ */
+export async function signJwtES256(jwk: SigningKeyJwk, claims: Record<string, unknown>): Promise<string> {
   const part = (o: unknown) => b64urlEncode(encoder.encode(JSON.stringify(o)));
-  const signingInput = `${part({ alg: "HS256", typ: "JWT" })}.${part(claims)}`;
-  return `${signingInput}.${await hmacSha256(secret, signingInput)}`;
+  const signingInput = `${part({ alg: "ES256", kid: jwk.kid, typ: "JWT" })}.${part(claims)}`;
+  const sig = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    await signingKey(jwk),
+    encoder.encode(signingInput)
+  );
+  return `${signingInput}.${b64urlEncode(new Uint8Array(sig))}`;
 }

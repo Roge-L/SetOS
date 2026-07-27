@@ -13,12 +13,25 @@ import { fakeDb, isScopedTo } from "./helpers/fake-db";
 import { deleteWeight, getWeightForDate, getWeightRange, logWeight } from "../src/services/body";
 import { updateExercise, updateSet } from "../src/services/workout";
 import { getDayTotals } from "../src/services/totals";
-import { signJwtHS256 } from "../src/lib/crypto";
+import { signJwtES256, type SigningKeyJwk } from "../src/lib/crypto";
 
-/** Read a JWT payload without verifying it — fine here, we just signed it. */
-function claimsOf(token: string): Record<string, unknown> {
-  const payload = token.split(".")[1]!.replace(/-/g, "+").replace(/_/g, "/");
-  return JSON.parse(atob(payload + "=".repeat((4 - (payload.length % 4)) % 4)));
+/** Decode a JWT segment without verifying — fine here, we just signed it. */
+function segment(token: string, index: number): Record<string, unknown> {
+  const part = token.split(".")[index]!.replace(/-/g, "+").replace(/_/g, "/");
+  return JSON.parse(atob(part + "=".repeat((4 - (part.length % 4)) % 4)));
+}
+const claimsOf = (t: string) => segment(t, 1);
+const headerOf = (t: string) => segment(t, 0);
+
+/** Generate a throwaway P-256 key in the same JWK shape Supabase imports. */
+async function testKey(kid = "test-kid"): Promise<SigningKeyJwk> {
+  // generateKey is typed as CryptoKey | CryptoKeyPair; ECDSA always yields a pair.
+  const pair = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+    "sign",
+    "verify",
+  ])) as CryptoKeyPair;
+  const jwk = (await crypto.subtle.exportKey("jwk", pair.privateKey)) as unknown as SigningKeyJwk;
+  return { kty: "EC", crv: "P-256", kid, d: jwk.d, x: jwk.x, y: jwk.y };
 }
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
@@ -120,11 +133,10 @@ describe("workout edits reject rows owned by someone else", () => {
 describe("per-user Postgres JWT", () => {
   // This is what arms RLS: PostgREST reads `sub` into auth.uid(). A wrong claim
   // here would scope every policy to the wrong person, so it is worth pinning.
-  const SECRET = "test-jwt-secret-not-a-real-one";
 
   it("carries the caller's id as sub with the authenticated role", async () => {
     const now = Math.floor(Date.now() / 1000);
-    const token = await signJwtHS256(SECRET, {
+    const token = await signJwtES256(await testKey(), {
       sub: ALICE,
       role: "authenticated",
       aud: "authenticated",
@@ -138,17 +150,26 @@ describe("per-user Postgres JWT", () => {
     expect(claims.sub).not.toBe(BOB);
   });
 
-  it("produces a signature that changes with the subject", async () => {
-    const claims = { role: "authenticated", iat: 0, exp: 120 };
-    const forAlice = await signJwtHS256(SECRET, { ...claims, sub: ALICE });
-    const forBob = await signJwtHS256(SECRET, { ...claims, sub: BOB });
-    expect(forAlice).not.toBe(forBob);
+  it("advertises ES256 and the kid Supabase verifies against", async () => {
+    // Without a matching kid, Postgres can't pick a public key and rejects the
+    // token outright — so the header is as load-bearing as the claims.
+    const token = await signJwtES256(await testKey("key-abc"), { sub: ALICE });
+    expect(headerOf(token)).toEqual({ alg: "ES256", kid: "key-abc", typ: "JWT" });
   });
 
-  it("cannot be forged without the secret", async () => {
+  it("emits a raw r‖s signature of the length JWS requires", async () => {
+    // WebCrypto gives IEEE P1363 (64 bytes for P-256); a DER-wrapped signature
+    // would be a different length and Postgres would reject it.
+    const token = await signJwtES256(await testKey(), { sub: ALICE });
+    const sig = token.split(".")[2]!.replace(/-/g, "+").replace(/_/g, "/");
+    const bytes = atob(sig + "=".repeat((4 - (sig.length % 4)) % 4)).length;
+    expect(bytes).toBe(64);
+  });
+
+  it("cannot be forged with a different key", async () => {
     const claims = { sub: ALICE, role: "authenticated", iat: 0, exp: 120 };
-    const real = await signJwtHS256(SECRET, claims);
-    const forged = await signJwtHS256("wrong-secret", claims);
+    const real = await signJwtES256(await testKey("k1"), claims);
+    const forged = await signJwtES256(await testKey("k2"), claims);
     expect(real.split(".")[2]).not.toBe(forged.split(".")[2]);
   });
 });

@@ -30,11 +30,17 @@ export interface Env {
   SUPABASE_ANON_KEY: string;
 
   /**
-   * Legacy Supabase JWT secret (Dashboard → Project Settings → API → JWT keys).
+   * EC P-256 private key as a JWK JSON string, imported into Supabase's
+   * signing-key system (Dashboard → Settings → JWT Keys) as a STANDBY key.
+   *
    * Signs the short-lived per-user Postgres JWT that makes `auth.uid()` resolve,
-   * which is what finally arms the RLS policies from migration 001.
+   * which is what arms the RLS policies from migration 001. Its `kid` must match
+   * the imported key, or Postgres can't find a public key to verify against.
+   *
+   * Not the legacy JWT secret: that one is on a deprecation path and can be
+   * revoked out from under us by a routine key rotation.
    */
-  SUPABASE_JWT_SECRET: string;
+  SUPABASE_SIGNING_KEY: string;
 
   /**
    * Service-role key — bypasses RLS. Used ONLY to read the invite list by email
