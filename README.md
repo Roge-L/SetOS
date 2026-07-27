@@ -145,6 +145,23 @@ delete from auth.users where email = 'friend@example.com';
 select email, display_name, timezone, is_active from public.users order by created_at;
 ```
 
+## Changing a password
+
+Anyone with an account can change their own password at `https://<worker>.workers.dev/password` — linked from the landing and sign-in pages. No admin involvement, and no reset email needed.
+
+It is a **web form, never an MCP tool**. A password typed to Claude would travel through model context, conversation history, and logs; credentials must not take that path.
+
+The policy is deliberately short, because the research says short is correct:
+
+- **15 characters minimum** — the [OWASP Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html) asks for 8 with MFA or 15 without, and SetOS has no MFA. Spaces are allowed and passphrases encouraged.
+- **No composition rules** — [NIST SP 800-63B](https://pages.nist.gov/800-63-4/sp800-63b/passwords/) recommends against them: users satisfy `1 upper + 1 digit + 1 symbol` in predictable ways (`Password1!`) for real usability cost and little gain.
+- **Breach check** against [HIBP Pwned Passwords](https://haveibeenpwned.com/API/v3#PwnedPasswords), which NIST does call for. Supabase's built-in version is Pro-plan only, so the worker does it via k-anonymity — only the first 5 characters of the password's SHA-1 leave the worker. It **fails open** if HIBP is unreachable, since someone changing a password may be doing so precisely because it leaked.
+- **Current password required**, which is also what produces the session used to make the change.
+
+**Changing a password signs out every Claude connector on that account.** This is not cosmetic. Supabase access tokens are self-contained JWTs that stay valid until they expire — verified experimentally, Supabase does *not* invalidate them on a password change — and SetOS's OAuth grants are separate from Supabase sessions entirely. So the worker explicitly revokes them. Without that step, changing a compromised password would leave the attacker's connector working.
+
+Verified end to end against the deployed worker: register a client, sign in, get a token, call `/mcp` (200), change the password, call `/mcp` with the same token (401).
+
 ## Security posture
 
 - **Tenant isolation, twice.** Every service query filters on `user_id`, and the request-path Supabase client authenticates as the caller (a 120-second ES256 JWT with `sub` = their id) so the RLS policies actually run. A future query that forgets its filter returns that user's own rows, not everyone's. The service-role key never reaches a tool handler — its only job is the invitation lookup right after a password checks out.
@@ -181,17 +198,19 @@ src/
   server.ts       # builds the McpServer per request for one principal + registers tools
   env.ts          # bindings/secrets contract
   auth/
-    password.ts   # email+password verification via Supabase Auth (no KDF in-worker)
+    password.ts   # email+password verify + change via Supabase Auth (no KDF in-worker)
+    policy.ts     # password rules (OWASP length, NIST no-composition + breach check)
     principal.ts  # invitation lookup (admin) + per-request profile load (RLS)
   oauth/
     handler.ts    # /authorize GET form + POST grant; landing, /health
     state.ts      # HMAC-signed blob carried between the form and its submission
     redirects.ts  # redirect-URI allowlist (threat model inside)
   db/             # per-user RLS client + admin client, row types
-  lib/            # crypto (b64url/HMAC/JWT), dates (timezone/DST), format, result helpers
+  lib/            # crypto (b64url/HMAC/ES256 JWT), pwned (HIBP k-anonymity),
+                  #   dates (timezone/DST), format, result helpers
   services/       # food, nutrition (FatSecret/OFF), workout, body, totals, summary
   tools/          # MCP tool definitions (zod I/O) grouped by domain
 tests/            # vitest: dates/DST, macros, nutrition, redirects, sealed state,
-                  #   sign-in gating, cross-tenant isolation
+                  #   sign-in gating, password policy, cross-tenant isolation
 db/migrations/    # Postgres schema; 006 is the multi-user migration
 ```

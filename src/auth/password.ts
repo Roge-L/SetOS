@@ -52,3 +52,47 @@ export async function verifyPassword(
 
   return { userId: data.user.id, email: data.user.email ?? email };
 }
+
+/**
+ * Change a password, having first proved the current one.
+ *
+ * `updateUser` needs an authenticated session, so signing in with the current
+ * password is both the proof of possession OWASP asks for and the thing that
+ * produces the session to update. Verified against Supabase: an `updateUser`
+ * call with no session is refused outright ("Auth session missing!"), so there
+ * is no path here that skips the check.
+ *
+ * Returns null on success, or a message safe to show the browser. Note this
+ * does NOT invalidate anything — Supabase access tokens are self-contained JWTs
+ * that stay valid until they expire, confirmed by experiment. Revoking the
+ * user's SetOS grants is the caller's job, and is not optional.
+ */
+export async function changePassword(
+  env: Env,
+  email: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<{ userId: string } | { error: string }> {
+  const client = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  const { data, error } = await client.auth.signInWithPassword({
+    email: email.trim().toLowerCase(),
+    password: currentPassword,
+  });
+  if (error || !data.user) return { error: "Incorrect email or current password." };
+
+  const { error: updateError } = await client.auth.updateUser({ password: newPassword });
+  if (updateError) {
+    // Supabase enforces its own floor (6 chars) and rejects reuse of the current
+    // password; surface its wording rather than inventing our own.
+    return { error: updateError.message };
+  }
+
+  // Drop the session we just created. It is not needed again, and leaving it
+  // alive would outlive the request for no reason.
+  await client.auth.signOut();
+
+  return { userId: data.user.id };
+}

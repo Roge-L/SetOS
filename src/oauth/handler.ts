@@ -19,7 +19,8 @@ import type { OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 import type { Env } from "../env";
 import { isAllowedRedirectUri } from "./redirects";
 import { sealState, unsealState } from "./state";
-import { verifyPassword } from "../auth/password";
+import { changePassword, verifyPassword } from "../auth/password";
+import { checkPassword, MIN_LENGTH } from "../auth/policy";
 import { createAdminDb } from "../db/client";
 import { findInvitedUser, type GrantProps } from "../auth/principal";
 
@@ -52,6 +53,30 @@ function html(body: string, status = 200): Response {
   );
 }
 
+function passwordPage(email = "", error?: string, notice?: string): Response {
+  return html(
+    `<h1>Change your SetOS password</h1>
+<p>Signing in to SetOS uses this password. Changing it signs out every Claude
+connector on your account, so you'll reconnect once afterwards.</p>
+${error ? `<p class="err">${esc(error)}</p>` : ""}
+${notice ? `<p>${esc(notice)}</p>` : ""}
+<form method="POST" action="/password">
+  <input type="email" name="email" placeholder="Email" value="${esc(email)}" autocomplete="username"
+         autocapitalize="none" autofocus required>
+  <input type="password" name="current" placeholder="Current password"
+         autocomplete="current-password" required>
+  <input type="password" name="next" placeholder="New password (${MIN_LENGTH}+ characters)"
+         autocomplete="new-password" required>
+  <input type="password" name="confirm" placeholder="Confirm new password"
+         autocomplete="new-password" required>
+  <button type="submit">Change password</button>
+</form>
+<p><small>A short phrase is easier to remember and stronger than a mangled word —
+spaces are allowed. New passwords are checked against known data breaches.</small></p>`,
+    error ? 400 : 200
+  );
+}
+
 function signInPage(sealed: string, clientName: string, email = "", error?: string): Response {
   return html(
     `<h1>Connect SetOS</h1>
@@ -63,7 +88,8 @@ ${error ? `<p class="err">${esc(error)}</p>` : ""}
          autocapitalize="none" autofocus required>
   <input type="password" name="password" placeholder="Password" autocomplete="current-password" required>
   <button type="submit">Sign in</button>
-</form>`,
+</form>
+<p><small><a href="/password">Change your password</a></small></p>`,
     error ? 401 : 200
   );
 }
@@ -83,8 +109,87 @@ export default {
         `<h1>SetOS</h1>
 <p>Personal calorie/macro and workout tracker, exposed to Claude over MCP.</p>
 <p>Add <code>${esc(url.origin)}/mcp</code> as a custom connector in Claude, then sign in with your
-SetOS account.</p>`
+SetOS account.</p>
+<p><a href="/password">Change your password</a></p>`
       );
+    }
+
+    /**
+     * Password change.
+     *
+     * A web form, never an MCP tool — a password typed to Claude would pass
+     * through model context, conversation history and logs. Credentials must not
+     * travel that path, so this is the one part of SetOS a person uses directly.
+     *
+     * No CSRF token, deliberately: CSRF needs ambient credentials for the
+     * browser to attach, and this form has none — no cookies, no session. The
+     * current password IS the authentication, and an attacker who can supply
+     * that does not need CSRF. Brute force is bounded by Supabase Auth's own
+     * per-IP rate limiting on sign-in.
+     */
+    if (url.pathname === "/password") {
+      if (request.method === "GET") return passwordPage();
+
+      if (request.method === "POST") {
+        const form = await request.formData();
+        const email = String(form.get("email") ?? "");
+        const current = String(form.get("current") ?? "");
+        const next = String(form.get("next") ?? "");
+        const confirm = String(form.get("confirm") ?? "");
+
+        if (next !== confirm) {
+          return passwordPage(email, "The two new passwords don't match.");
+        }
+
+        // Policy first: no point spending a sign-in on a password we'd reject.
+        const failure = await checkPassword(next, current);
+        if (failure) return passwordPage(email, failure.message);
+
+        const result = await changePassword(env, email, current, next);
+        if ("error" in result) return passwordPage(email, result.error);
+
+        // Being able to sign in to Supabase is not the same as having a SetOS
+        // invitation; don't confirm to a stranger that an address is a SetOS user.
+        const invited = await findInvitedUser(createAdminDb(env), result.userId);
+
+        /**
+         * Invalidate every existing connector for this account.
+         *
+         * OWASP asks that a password change invalidate other sessions. Supabase
+         * does NOT do this — its access tokens are self-contained JWTs that stay
+         * valid until expiry (verified experimentally), and SetOS's own OAuth
+         * grants are separate from Supabase sessions entirely. So if someone
+         * changes their password because it was compromised, this is the step
+         * that actually cuts off an attacker's connector.
+         */
+        let revoked = 0;
+        try {
+          const grants = await env.OAUTH_PROVIDER.listUserGrants(result.userId);
+          for (const grant of grants.items) {
+            await env.OAUTH_PROVIDER.revokeGrant(grant.id, result.userId);
+            revoked++;
+          }
+        } catch {
+          // The password IS changed by this point; failing the whole request
+          // would tell the user it didn't work when it did. Say so instead.
+          return html(
+            `<h1>Password changed</h1>
+<p>Your password was updated, but existing Claude connections could not be signed
+out automatically. Remove and re-add the SetOS connector in Claude to be sure.</p>`
+          );
+        }
+
+        return html(
+          `<h1>Password changed</h1>
+<p>${invited ? "" : "Note: this account has no active SetOS access. "}${
+            revoked > 0
+              ? `Signed out ${revoked} existing Claude connection${revoked === 1 ? "" : "s"} — reconnect with your new password.`
+              : "There were no active Claude connections to sign out."
+          }</p>`
+        );
+      }
+
+      return new Response("Method not allowed", { status: 405 });
     }
 
     if (url.pathname === "/authorize") {
