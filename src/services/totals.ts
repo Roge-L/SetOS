@@ -3,9 +3,11 @@ import type { DailyTotalsRow } from "../db/types";
 
 /**
  * Rebuild the materialized daily totals for one local day by calling the
- * `recalculate_daily_totals` SQL function (which sums meal_logs grouped by
- * `date(logged_at at time zone 'America/New_York')`). Call this after any write
- * that changes a day's meals (log / edit / move / delete).
+ * `recalculate_daily_totals` SQL function, which sums meal_logs grouped by
+ * `date(logged_at at time zone <that user's timezone>)` — the zone is read from
+ * the owner's row, so two users in different zones each get their own day
+ * boundaries. Call this after any write that changes a day's meals
+ * (log / edit / move / delete).
  */
 export async function recalcDailyTotals(db: Db, userId: string, date: string): Promise<void> {
   const { error } = await db.rpc("recalculate_daily_totals", { p_user_id: userId, p_date: date });

@@ -299,7 +299,14 @@ function ownerOfSetNode(node: unknown): string | undefined {
   return ownerOfExerciseNode(embedded(node, "workout_exercises"));
 }
 
-/** Confirm an exercise belongs to this user (service-role bypasses RLS). */
+/**
+ * Confirm an exercise belongs to this user.
+ *
+ * Workout rows carry no user_id of their own, so ownership is only reachable by
+ * walking exercise -> session. RLS enforces the same thing underneath now, but
+ * this check stays: it turns a foreign id into a clear "no such exercise" rather
+ * than a confusing empty update.
+ */
 async function assertExerciseOwned(db: Db, userId: string, exerciseId: string) {
   const { data } = await db
     .from("workout_exercises")

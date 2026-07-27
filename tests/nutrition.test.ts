@@ -2,7 +2,9 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { lookupFood } from "../src/services/nutrition";
 import type { Env } from "../src/env";
 
-const baseEnv = { SETOS_TIMEZONE: "America/New_York" } as unknown as Env;
+// lookupFood only reads the (optional) FatSecret credentials; with none set it
+// falls back to Open Food Facts, which is what these tests exercise.
+const baseEnv = {} as unknown as Env;
 
 afterEach(() => vi.restoreAllMocks());
 

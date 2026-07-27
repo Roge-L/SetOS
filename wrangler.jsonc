@@ -49,19 +49,20 @@
   // listed here — putting them in this file would commit them to git.
   //
   //   Required secrets (true secrets only — set with `wrangler secret put`):
-  //     SETOS_CONSENT_PASSPHRASE  approves a connection on the OAuth consent screen
-  //     SUPABASE_SERVICE_ROLE_KEY service-role key (server-side, bypasses RLS)
+  //     SETOS_STATE_SECRET        HMAC key for the signed sign-in form blob
+  //     SUPABASE_JWT_SECRET       signs the per-user Postgres JWT that arms RLS
+  //     SUPABASE_SERVICE_ROLE_KEY bypasses RLS; invitation lookup at sign-in only
   //     FATSECRET_ID              FatSecret OAuth client id   (optional; lookup_food)
   //     FATSECRET_SECRET          FatSecret OAuth client secret (optional; lookup_food)
   //
-  // SUPABASE_URL and SETOS_USER_ID live in `vars` below — the URL is public and the
-  // user id is inert without the service-role key, so neither is a real secret.
+  // Gone since v2: SETOS_USER_ID and SETOS_TIMEZONE. Both were server-wide
+  // answers to per-person questions — identity now comes from the caller's OAuth
+  // grant, and timezone from their row in public.users.
   "vars": {
-    // IANA timezone used for "today" and day boundaries. Must match the timezone
-    // baked into the recalculate_daily_totals() SQL function (America/New_York).
-    "SETOS_TIMEZONE": "America/New_York",
-    // Supabase project (public URL) + the single owner these rows belong to.
+    // Supabase project URL — public by design.
     "SUPABASE_URL": "https://mfxypgltmsyfkawnokpc.supabase.co",
-    "SETOS_USER_ID": "7213a04f-1162-4d14-9257-894563b2b6aa"
+    // The anon key is meant to be publishable: it grants nothing on its own, and
+    // is only ever paired with a per-request user JWT that RLS evaluates.
+    "SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1meHlwZ2x0bXN5Zmthd25va3BjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxNzA4MjAsImV4cCI6MjA5MDc0NjgyMH0.X7FFDoE18IdAxoXEO7N-zcVsGCGqhCt5StqlRss2pqM"
   }
 }

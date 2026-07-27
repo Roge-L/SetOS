@@ -1,16 +1,26 @@
 # Local secrets for `wrangler dev`. Copy to `.dev.vars` and fill in.
 # In production these are set with `npx wrangler secret put <NAME>` instead.
 #
-# Non-secret config (SUPABASE_URL, SETOS_USER_ID, SETOS_TIMEZONE) lives in
-# wrangler.jsonc `vars`, so it is NOT needed here.
+# Non-secret config (SUPABASE_URL, SUPABASE_ANON_KEY) lives in wrangler.jsonc
+# `vars`, so it is NOT needed here.
 
-# Approves a connection on the OAuth consent screen. Long + random:
-#   openssl rand -hex 24
-SETOS_CONSENT_PASSPHRASE=
+# --- Sign-in ----------------------------------------------------------------
+# HMAC key for the signed blob that carries the in-flight authorization request
+# between the sign-in form and its submission.
+# Any long random string:  openssl rand -hex 32
+SETOS_STATE_SECRET=
 
-# Supabase service-role key (server-side, bypasses RLS)
+# --- Supabase ---------------------------------------------------------------
+# Dashboard -> Project Settings -> API -> JWT keys -> "JWT secret" (legacy).
+# Signs the short-lived per-user token that makes auth.uid() resolve, which is
+# what arms the RLS policies. Without it every request fails closed.
+SUPABASE_JWT_SECRET=
+
+# Service-role key. Bypasses RLS; used ONLY to look up the invitation row right
+# after a password checks out. Never reaches a tool handler.
 SUPABASE_SERVICE_ROLE_KEY=
 
-# FatSecret (optional — only setos_lookup_food uses it). https://platform.fatsecret.com
+# --- Optional ---------------------------------------------------------------
+# FatSecret (only setos_lookup_food uses it). https://platform.fatsecret.com
 FATSECRET_ID=
 FATSECRET_SECRET=

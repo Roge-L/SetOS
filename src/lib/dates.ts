@@ -1,11 +1,12 @@
 /**
  * Timezone-aware date helpers.
  *
- * SetOS lives in a single local timezone (SETOS_TIMEZONE, America/New_York by
- * default). A meal eaten at 11pm ET belongs to that day, not to the next UTC day —
- * so "today", day boundaries, and per-day queries all resolve against the local
- * zone, matching the `recalculate_daily_totals()` SQL function which groups on
- * `date(logged_at at time zone 'America/New_York')`.
+ * Every function here takes the timezone explicitly, because it belongs to the
+ * person making the request (`users.timezone`), not to the server. A meal eaten
+ * at 11pm belongs to that day in the eater's zone, not to the next UTC day — so
+ * "today", day boundaries, and per-day queries all resolve against that zone,
+ * matching the `recalculate_daily_totals()` SQL function, which looks up the
+ * same value and groups on `date(logged_at at time zone <user's zone>)`.
  *
  * Implementation uses `Intl.DateTimeFormat`, which is available in Workers and
  * handles DST transitions correctly (offsets are computed per-instant, not fixed).

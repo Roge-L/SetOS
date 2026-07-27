@@ -1,6 +1,6 @@
 {
   "name": "setos",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
   "description": "SetOS — a personal calorie/macro + workout tracker you talk to through Claude over MCP.",
