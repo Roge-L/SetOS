@@ -121,18 +121,33 @@ claude mcp login setos
 
 ## Inviting someone
 
-Two steps, because two things must both be true — they need credentials, *and* they need an invitation.
+Self-signup is disabled, so accounts only exist because you made them. Three steps — two things must be true for access (credentials **and** an invitation), plus a handoff.
 
-1. **Create the account.** Supabase Dashboard → **Authentication → Users → Add user**, tick *Auto Confirm User*, and give them a password to change later. The `on_auth_user_created` trigger mirrors them into `public.users` automatically.
-2. **Set their timezone**, which drives their day boundaries independently of everyone else's:
+**1. Create the account.** Supabase Dashboard → **Authentication → Users → Add user** → tick *Auto Confirm User*. Give it a long throwaway password; they'll replace it. The `on_auth_user_created` trigger mirrors them into `public.users` automatically.
+
+Note the dashboard's user detail panel has no "set password" button — only recovery emails, which ride on Supabase's rate-limited testing SMTP and often don't reach Gmail. To set a password directly, use the Admin API:
+
+```bash
+curl -X PUT "$SUPABASE_URL/auth/v1/admin/users/<user-uuid>" \
+  -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+  -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+  -H 'content-type: application/json' \
+  -d '{"password":"a long passphrase they will replace"}'
+```
+
+**2. Set their timezone**, which drives their day boundaries independently of everyone else's. Get this right at invite time — changing it later can refile meals onto different days:
 
 ```sql
 update public.users
-set display_name = 'Brother', timezone = 'America/Los_Angeles'
-where email = 'brother@example.com';
+set display_name = 'Friend', timezone = 'America/Regina'
+where email = 'friend@example.com';
 ```
 
+**3. Hand off, then let them take ownership.** Send the temporary password over something reasonable, and tell them to change it at `/password` immediately. Until they do, you can sign in as them — which is worth closing.
+
 An account in `auth.users` without an active `public.users` row gets nothing — that second row is the invitation, so you can revoke access without deleting anyone's login.
+
+> **Admin password resets do not revoke connectors.** Changing a password through `/password` revokes that user's OAuth grants; setting one via the Admin API bypasses the worker entirely and revokes nothing. If you ever reset someone's password *because it was compromised*, revoke their grants too — or have them use `/password` instead.
 
 ```sql
 -- Suspend (keeps their data, kills access on the next request)
